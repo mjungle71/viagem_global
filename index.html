@@ -213,6 +213,10 @@ main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
 .lrow input:focus{outline:none;border-bottom-color:var(--green);background:var(--panel-2)}
 .lrow input::placeholder{color:var(--ink-3);opacity:.7}
 .ta-r{text-align:right}
+.mostrarmoeda{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:0 0 9px}
+.mostrarmoeda label{font-size:12px;color:var(--ink-3)}
+.mostrarmoeda select{background:var(--panel);border:1px solid var(--rule);border-radius:6px;
+  padding:4px 8px;font-size:12.5px;color:var(--ink)}
 .cell.grip{display:flex;align-items:center;justify-content:center}
 .cell.lupa{display:flex;align-items:center}
 .cell.lupa .griph{
@@ -854,6 +858,7 @@ function migrarViagem(t){
     }
   }
   if(!t.mostrarEm) t.mostrarEm="BRL";
+  if(t.mostrarEm==="FX") t.mostrarEm=t.moeda||"BRL";   /* formato antigo */
   if(!t.classeVoo) t.classeVoo="ECONOMY";
   if(t.precoVooTotal===undefined) t.precoVooTotal=true;
   if(!t.quartos) t.quartos=Math.max(1,Math.ceil(totalPax(t)/2));
@@ -1256,11 +1261,18 @@ function painelPoupanca(t){
   const moedaOpts=m=>["BRL"].concat(Object.keys(MOEDAS))
     .map(k=>`<option value="${k}" ${k===m?"selected":""}>${k==="BRL"?"BRL — Real":k+" — "+MOEDAS[k].n}</option>`).join("");
 
+  const alvo=moedaMostrada(t);
+  const opts=moedasDaPoupanca(t);
   let h=`<section class="sec">
+    <div class="mostrarmoeda">
+      <label for="mmoeda">Mostrar valores em</label>
+      <select id="mmoeda">${opts.map(k=>
+        `<option value="${k}" ${k===alvo?"selected":""}>${esc(nomeDe(k))}</option>`).join("")}</select>
+    </div>
     <div class="ltable" style="--g:${grid}" data-lista="guardados">
       <div class="lhead" style="grid-template-columns:var(--g)">
         <div>Onde está</div><div>Moeda</div><div class="ta-r">Valor</div>
-        <div class="ta-r">R$ por 1</div><div class="ta-r">Em reais</div><div></div>
+        <div class="ta-r">R$ por 1</div><div class="ta-r">Em ${esc(simboloDe(alvo))}</div><div></div>
       </div>`;
   if(!gs.length){
     h+=`<div class="lrow" style="grid-template-columns:1fr"><div style="color:var(--ink-3);font-size:13.5px;padding:6px 0">
@@ -1278,7 +1290,7 @@ function painelPoupanca(t){
         ? `<span class="fixo1">1,0000</span>`
         : `<input type="text" inputmode="decimal" class="ta-r${semTaxa?" faltando":""}" data-g="${g.id}.taxa" data-n="4"
             value="${fmt(num(g.taxa)||taxaPadrao(t,g.moeda),4)}">`}</div>
-      <div class="rowtot" data-l="Em reais"><span data-calc="gr:${g.id}"></span></div>
+      <div class="rowtot" data-l="Em ${esc(simboloDe(alvo))}"><span data-calc="gr:${g.id}"></span></div>
       <button class="del" data-delg="${g.id}" title="Remover" aria-label="Remover">×</button>
     </div>`;
   });
@@ -1290,10 +1302,6 @@ function painelPoupanca(t){
     <button class="addrow" data-addg="1">+ adicionar fonte</button>
     <div class="mapacts">
       <button class="btn small" data-act="taxasguardado">Atualizar cotações</button>
-      <div class="seg" style="margin-left:auto">
-        <button data-mostrar="BRL" aria-pressed="${t.mostrarEm!=="FX"}">R$</button>
-        <button data-mostrar="FX" aria-pressed="${t.mostrarEm==="FX"}">${esc(sym)}</button>
-      </div>
     </div>
 
     <div class="reserva" style="margin-top:14px">
@@ -2125,8 +2133,8 @@ function refresh(){
 
   // poupança: soma das fontes, cada uma na sua moeda
   const taxa=num(t.cambio)||1;
-  const mostrarFX = t.mostrarEm==="FX";
-  const dinheiro = v => mostrarFX ? fx(v/taxa,t) : brl(v);
+  const alvoM = moedaMostrada(t);
+  const dinheiro = v => emMoeda(t,v,alvoM);
   (t.guardados||[]).forEach(g=>put("gr:"+g.id, dinheiro(valorEmBRL(t,g))));
   const guardadoBRL = totalGuardado(t);
   const falta=Math.max(0,c.total-guardadoBRL);
@@ -2207,7 +2215,8 @@ function refresh(){
   }
   const porMes = meses>0 ? falta/meses : 0;
   put("mensal", meses>0?dinheiro(porMes)+"/mês":"—");
-  put("mensalfx", meses>0&&!mostrarFX?fx(porMes/taxa,t)+"/mês":"");
+  put("mensalfx", meses>0 ? (alvoM==="BRL" ? emMoeda(t,porMes,t.moeda)+"/mês"
+                                             : brl(porMes)+"/mês") : "");
   const nF=(t.guardados||[]).length;
   const mt=document.querySelector('[data-calc="mensaltxt"]');
   if(mt) mt.innerHTML = meses>0
@@ -2456,10 +2465,7 @@ document.addEventListener("click",e=>{
     tr.guardados=(tr.guardados||[]).filter(g=>g.id!==t.dataset.delg);
     touch(tr.id); render(); return;
   }
-  if(t.dataset.mostrar){
-    const tr=trip(); if(!tr) return;
-    tr.mostrarEm=t.dataset.mostrar; touch(tr.id); render(); return;
-  }
+
   if(act==="taxasguardado"){ atualizarTaxasGuardadas(); return; }
   if(t.dataset.busca){
     const [cat,id]=t.dataset.busca.split(":");
@@ -2818,6 +2824,10 @@ document.addEventListener("change",e=>{
     touch(tr.id);
     if(state.hoteis) buscarHoteis(state.hoteis.linha);
     return;
+  }
+  if(el.id==="mmoeda"){
+    const tr=trip(); if(!tr) return;
+    tr.mostrarEm=el.value; touch(tr.id); render(); return;
   }
   if(el.id==="classevoo"){
     const tr=trip(); if(!tr) return;
@@ -3850,6 +3860,33 @@ async function garantirTaxa(moeda){
   }catch(e){
     toast("Não achei a cotação de "+moeda+" — digite à mão");
   }finally{ buscandoTaxa[moeda]=false; }
+}
+/* Exibição da poupança em qualquer moeda: BRL, a moeda da viagem, ou qualquer
+   uma usada nas fontes. Tudo é somado em reais e convertido só na hora de mostrar. */
+function moedaMostrada(t){
+  const m=t.mostrarEm==="FX" ? (t.moeda||"BRL") : (t.mostrarEm||"BRL");
+  return moedasDaPoupanca(t).indexOf(m)>=0 ? m : "BRL";
+}
+function simboloDe(m){ return m==="BRL" ? "R$" : (MOEDAS[m] ? MOEDAS[m].s : m); }
+function nomeDe(m){ return m==="BRL" ? "BRL — Real" : (MOEDAS[m] ? m+" — "+MOEDAS[m].n : m); }
+function taxaDeExibicao(t,moeda){
+  if(!moeda||moeda==="BRL") return 1;
+  const p=taxaPadrao(t,moeda); if(p>0) return p;
+  /* se a cotação não está na viagem, aproveita a que o usuário digitou numa fonte */
+  const g=(t.guardados||[]).find(x=>x.moeda===moeda && num(x.taxa)>0);
+  return g ? num(g.taxa) : 0;
+}
+function moedasDaPoupanca(t){
+  const l=["BRL"];
+  if(t.moeda && t.moeda!=="BRL") l.push(t.moeda);
+  (t.guardados||[]).forEach(g=>{ if(g.moeda && l.indexOf(g.moeda)<0 && taxaDeExibicao(t,g.moeda)>0) l.push(g.moeda); });
+  return l;
+}
+function emMoeda(t,valorBRL,moeda){
+  if(!moeda||moeda==="BRL") return brl(valorBRL);
+  const tx=taxaDeExibicao(t,moeda);
+  if(!(tx>0)) return "—";
+  return simboloDe(moeda)+" "+fmt(valorBRL/tx);
 }
 function valorEmBRL(t,g){
   const tx=num(g.taxa)|| taxaPadrao(t,g.moeda);

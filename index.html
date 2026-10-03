@@ -2296,9 +2296,12 @@ function refresh(){
     }
   }
   put("plTotal", fmt(planejado));
-  /* Pinta célula por célula, do mês mais próximo para o mais distante e, dentro de
-     cada mês, de cima para baixo. Só pinta o que o dinheiro cobre por inteiro;
-     quando não dá para pagar uma parcela cheia, para de pintar dali em diante. */
+  /* Pinta célula por célula, do mês mais próximo para o mais distante. Dentro de
+     cada mês, paga as parcelas em ordem (de cima para baixo) enquanto couberem;
+     quando a parcela da vez não cabe, não para: procura no MESMO mês outras
+     parcelas que ainda caibam na sobra e pinta essas (aproveitando o dinheiro).
+     Só quando o mês não fecha por inteiro é que para e guarda a sobra, sem avançar
+     para os meses seguintes — a cobertura continua sendo sequencial por mês. */
   document.querySelectorAll("[data-cel]").forEach(el=>el.classList.remove("coberto","parcial"));
   let acumulado=0, cobertos=0, restaCob=guardadoBRL, acabou=false;
   mesesPl.forEach(m=>{
@@ -2307,15 +2310,35 @@ function refresh(){
     put("plm:"+m, tm?fmt(tm):"—");
     put("pla:"+m, acumulado?fmt(acumulado):"—");
     if(acabou) return;
-    for(const l of linhasPl){
-      const v=valPlano(t,m,l.k);
-      if(v<=0.005) continue;
-      if(restaCob>=v-0.005){
-        restaCob-=v; cobertos+=v;
-        const cel=document.querySelector(`[data-cel="${m}.${l.k}"]`);
-        if(cel) cel.classList.add("coberto");
-      }else{ acabou=true; break; }
+    /* parcelas reais do mês (valor > 0), preservando a ordem de exibição */
+    const itens=linhasPl.map(l=>({k:l.k,v:valPlano(t,m,l.k)})).filter(x=>x.v>0.005);
+    const pagas=new Set();
+    /* 1) paga em ordem enquanto a próxima da fila couber */
+    for(const it of itens){
+      if(restaCob>=it.v-0.005){ restaCob-=it.v; cobertos+=it.v; pagas.add(it.k); }
+      else break;
     }
+    /* 2) sobrou dinheiro e ficou parcela sem pagar: tenta encaixar outras do mês.
+          pega, entre as que ainda cabem, a de MAIOR valor primeiro — aproveita melhor
+          a sobra e dá o comportamento desejado (R$ 2.156 cobre a Reserva de 1.481;
+          ao passar de 3.860, a ordem natural já pinta Atrações antes). */
+    let encaixou=true;
+    while(encaixou){
+      encaixou=false;
+      let melhor=null;
+      for(const it of itens){
+        if(pagas.has(it.k)) continue;
+        if(it.v<=restaCob+0.005 && (!melhor || it.v>melhor.v)) melhor=it;
+      }
+      if(melhor){ restaCob-=melhor.v; cobertos+=melhor.v; pagas.add(melhor.k); encaixou=true; }
+    }
+    /* pinta o que foi pago neste mês */
+    pagas.forEach(k=>{
+      const cel=document.querySelector(`[data-cel="${m}.${k}"]`);
+      if(cel) cel.classList.add("coberto");
+    });
+    /* o mês fechou por inteiro? se faltou alguma parcela, para por aqui */
+    if(pagas.size<itens.length) acabou=true;
   });
   put("plSobra", restaCob>0.005 ? brl(restaCob) : "—");
   const fx1=mesesPl.reduce((a,m)=>a+valPlano(t,m,"compraFX"),0);

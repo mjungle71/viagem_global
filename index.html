@@ -617,6 +617,35 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
   .tmoney{text-align:left;margin-top:8px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+
+/* ---------- calendário (agenda dia a dia) ---------- */
+.calsec{margin:14px 0 4px;border:1px solid var(--rule);border-radius:12px;background:var(--panel);overflow:hidden}
+.calsec.aberto{border-color:var(--green)}
+.calhead{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;padding:14px 16px;cursor:pointer}
+.calhead:hover .caltit{color:var(--green)}
+.calhead .dot{width:10px;height:10px;border-radius:3px;background:var(--clay);flex:none}
+.calwrap{display:block;min-width:0;flex:1}
+.caltit{display:block;font-family:"Newsreader",serif;font-size:19px;font-weight:500;transition:color .12s}
+.calmeta{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.calsec.aberto .caltit{color:var(--green)}
+.calsec.aberto .calchev{transform:rotate(180deg)}
+.calchev{color:var(--ink-3);transition:transform .22s ease;flex:none}
+.calbody{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}
+.calbody>div{overflow:hidden}
+.calsec.aberto .calbody{grid-template-rows:1fr}
+.calinner{padding:4px 16px 16px}
+.calacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+@media print{
+  body *{visibility:hidden}
+  #area-print, #area-print *{visibility:visible}
+  #area-print{position:absolute;left:0;top:0;width:100%;padding:0}
+  #area-print .calhead .calchev,#area-print .calacts,#area-print .addrow,#area-print .del{display:none !important}
+  #area-print .calbody{grid-template-rows:1fr !important}
+  #area-print .lrow input{border:none;background:none;color:#000;padding:2px 0}
+  .calsec{border:none}
+  @page{margin:14mm}
+}
+
 </style>
 </head>
 <body>
@@ -923,7 +952,7 @@ function novaViagem(d){
     meta:0, metaCur:"FX", reserva:0, reservaCur:"BRL", reservaFixaV2:true, guardado:0, guardadoCur:"BRL",
     cambioAuto:true, iofOn:false, iof:3.5, cambioFonte:"", cambioEm:"", roteiro:[], locais:[],
     classeVoo:"ECONOMY", precoVooTotal:true, quartos:0, soCafe:false,
-    guardados:[], mostrarEm:"BRL", taxas:{}
+    guardados:[], mostrarEm:"BRL", taxas:{}, agenda:[]
   };
   for(const c of CATS) t[c.key]=[];
   return t;
@@ -1877,6 +1906,91 @@ function painelPlano(t){
   return h;
 }
 
+
+/* ---------------------------- calendário (agenda) ---------------------------- */
+const CAL_DOW=["dom","seg","ter","qua","qui","sex","sáb"];
+function calFmtData(iso){
+  if(!iso) return "";
+  const p=String(iso).split("-"); if(p.length!==3) return esc(iso);
+  const d=new Date(+p[0],+p[1]-1,+p[2]);
+  if(isNaN(d)) return esc(iso);
+  return `${String(+p[2]).padStart(2,"0")}/${String(+p[1]).padStart(2,"0")} · ${CAL_DOW[d.getDay()]}`;
+}
+function secaoCalendario(t){
+  const aberto=!!(state.abertos&&state.abertos.calendario);
+  const ag=Array.isArray(t.agenda)?t.agenda:[];
+  const grid="118px minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.3fr) 26px";
+  let linhas="";
+  if(!ag.length){
+    linhas=`<div class="lrow" style="grid-template-columns:1fr"><div style="color:var(--ink-3);font-size:13.5px;padding:6px 0">Nenhum dia ainda. Adicione os dias da viagem, um por linha.</div></div>`;
+  } else {
+    ag.forEach(d=>{
+      linhas+=`<div class="lrow" style="grid-template-columns:var(--g)" data-calrid="${d.id}">
+        <div class="cell" data-l="Data"><input type="date" data-cal="${d.id}.data" value="${esc(d.data||"")}"></div>
+        <div class="cell" data-l="Cidade"><input type="text" data-cal="${d.id}.cidade" value="${esc(d.cidade||"")}" placeholder="Istambul"></div>
+        <div class="cell wide" data-l="Atividade"><input type="text" data-cal="${d.id}.atividade" value="${esc(d.atividade||"")}" placeholder="O que fazer nesse dia"></div>
+        <div class="cell wide" data-l="Nota"><input type="text" data-cal="${d.id}.nota" value="${esc(d.nota||"")}" placeholder="Observações"></div>
+        <button class="del" data-delcal="${d.id}" title="Remover dia" aria-label="Remover dia">×</button>
+      </div>`;
+    });
+  }
+  const meta = ag.length ? `${ag.length} ${ag.length===1?"dia":"dias"}` : "monte o roteiro dia a dia";
+  return `<div class="calsec${aberto?" aberto":""}" data-calsec="1">
+    <button class="calhead" data-caltoggle="1" aria-expanded="${aberto}">
+      <i class="dot"></i>
+      <span class="calwrap"><span class="caltit">Calendário</span>
+        <span class="calmeta">${meta}</span></span>
+      <svg class="calchev" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="calbody"><div><div class="calinner">
+      <div class="ltable" style="--g:${grid}" data-lista="agenda">
+        <div class="lhead" style="grid-template-columns:var(--g)">
+          <div>Data</div><div>Cidade</div><div>Atividade</div><div>Nota</div><div></div>
+        </div>
+        ${linhas}
+      </div>
+      <button class="addrow" data-addcal="1">+ adicionar dia</button>
+      <div class="calacts">
+        <button class="btn small" data-act="preencherdias">Gerar dias do período</button>
+        <button class="btn small" data-act="imprimircal">Imprimir calendário</button>
+      </div>
+    </div></div></div>
+  </div>`;
+}
+function imprimirCalendario(){
+  const t=trip(); if(!t) return;
+  state.abertos=state.abertos||{}; state.abertos.calendario=true; render();
+  const sec=document.querySelector('[data-calsec]'); if(!sec){ window.print(); return; }
+  const wrap=document.createElement("div"); wrap.id="area-print";
+  const titulo=document.createElement("div");
+  titulo.innerHTML=`<h1 style="font-family:'Newsreader',serif;font-size:26px;margin:0 0 2px">${esc(t.nome||"Viagem")}</h1>
+    <div style="color:#555;font-size:13px;margin-bottom:12px">${esc(t.destino||"")}${t.inicio?` — ${calFmtData(t.inicio)} a ${calFmtData(t.fim)}`:""}</div>`;
+  const clone=sec.cloneNode(true); clone.classList.add("aberto");
+  wrap.appendChild(titulo); wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  window.print();
+  setTimeout(()=>wrap.remove(),300);
+}
+function gerarDiasPeriodo(){
+  const t=trip(); if(!t) return;
+  if(!t.inicio||!t.fim){ toast("Defina início e fim da viagem primeiro"); return; }
+  const a=t.inicio.split("-"), b=t.fim.split("-");
+  let d=new Date(+a[0],+a[1]-1,+a[2]); const fim=new Date(+b[0],+b[1]-1,+b[2]);
+  if(isNaN(d)||isNaN(fim)||d>fim){ toast("Período inválido"); return; }
+  const existentes=new Set((t.agenda||[]).map(x=>x.data));
+  t.agenda=Array.isArray(t.agenda)?t.agenda:[];
+  let add=0, guard=0;
+  while(d<=fim && guard++<400){
+    const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    if(!existentes.has(iso)){ t.agenda.push({id:uid(),data:iso,cidade:"",atividade:"",nota:""}); add++; }
+    d.setDate(d.getDate()+1);
+  }
+  t.agenda.sort((x,y)=>String(x.data).localeCompare(String(y.data)));
+  state.abertos=state.abertos||{}; state.abertos.calendario=true;
+  touch(t.id); render();
+  toast(add?`${add} ${add===1?"dia adicionado":"dias adicionados"}`:"Todos os dias já estavam na lista");
+}
+
 function painelMapa(t){
   const rs=t.roteiro||[];
   const loc=paradasLocalizadas(t).length;
@@ -1996,6 +2110,8 @@ function viewTrip(){
       <div class="f"><label>R$ por 1 ${esc(sym)}</label><input type="text" inputmode="decimal" data-t="cambio" data-n="4" value="${fmt(num(t.cambio),4)}"></div>
     </div>
   </div>
+
+  ${secaoCalendario(t)}
 
   <div class="layout">
     <div class="catlist">
@@ -2375,6 +2491,28 @@ document.addEventListener("click",e=>{
   if(t.dataset.ano){ state.ano=+t.dataset.ano; state.view="ano"; state.tripId=null; saveUi(); render(); return; }
   if(t.dataset.addyear){ state.modal="ano"; renderModal(); return; }
   if(t.dataset.open){ state.tripId=t.dataset.open; state.view="viagem"; state.abertos={}; saveUi(); render(); window.scrollTo(0,0); return; }
+  if(t.dataset.caltoggle){
+    state.abertos=state.abertos||{};
+    const ab=!state.abertos.calendario; state.abertos.calendario=ab;
+    saveUi&&saveUi();
+    const sec=t.closest(".calsec"); if(sec){ sec.classList.toggle("aberto",ab); t.setAttribute("aria-expanded",String(ab)); }
+    return;
+  }
+  if(t.dataset.addcal){
+    const tr=trip(); if(!tr) return;
+    tr.agenda=Array.isArray(tr.agenda)?tr.agenda:[];
+    tr.agenda.push({id:uid(),data:"",cidade:"",atividade:"",nota:""});
+    state.abertos=state.abertos||{}; state.abertos.calendario=true;
+    touch(tr.id); render();
+    const rows=document.querySelectorAll('[data-lista="agenda"] .lrow input');
+    if(rows.length) rows[rows.length-1].focus();
+    return;
+  }
+  if(t.dataset.delcal){
+    const tr=trip(); if(!tr) return;
+    tr.agenda=(tr.agenda||[]).filter(r=>r.id!==t.dataset.delcal);
+    touch(tr.id); render(); return;
+  }
   if(t.dataset.cattoggle){
     const k=t.dataset.cattoggle, aberto=!state.abertos[k];
     state.abertos[k]=aberto;
@@ -2496,6 +2634,8 @@ document.addEventListener("click",e=>{
   }
   if(act==="parcelar"){ state.modal="parcelar"; renderModal(); return; }
   if(act==="lancarparcelas"){ lancarParcelas(); return; }
+  if(act==="imprimircal"){ imprimirCalendario(); return; }
+  if(act==="preencherdias"){ gerarDiasPeriodo(); return; }
   if(act==="distribuirplano"){ state.abertos.plano=true; distribuirPlano(); return; }
   if(act==="limparplano"){ limparPlano(); return; }
   if(act==="maismes"){
@@ -2749,6 +2889,12 @@ document.addEventListener("input",e=>{
     g[campo] = el.dataset.n!=null ? num(el.value) : el.value;
     if(campo==="moeda"){ g.taxa=taxaPadrao(tr,g.moeda); touch(tr.id); render(); garantirTaxa(g.moeda); return; }
     touch(tr.id); refresh(); return;
+  }
+  if(el.dataset.cal){
+    const [id,campo]=el.dataset.cal.split("."), tr=trip(); if(!tr) return;
+    const d=(tr.agenda||[]).find(x=>x.id===id); if(!d) return;
+    d[campo]=el.value;
+    touch(tr.id); return;
   }
   if(el.dataset.r){
     const [id,campo]=el.dataset.r.split("."), tr=trip(); if(!tr) return;

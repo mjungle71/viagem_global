@@ -3302,10 +3302,9 @@ document.addEventListener("input",e=>{
       sincronizarPeriodo(r,cps,campo,0);
       pintarPeriodo(c=>`[data-p="hospedagem.${id}.${c}"]`, r, cps, campo);
     }
-    if(!tr._sync && (tr.agenda&&tr.agenda.length) && (k==="passagens"||k==="hospedagem"||k==="atracoes")){
-      tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false;
-      touch(tr.id); render(); return;
-    }
+    /* a sincronização com o calendário NÃO roda a cada tecla (isso recriava a tela
+       e jogava o scroll para o topo). Ela acontece no evento "change", quando você
+       termina de editar e sai do campo — veja o listener de change abaixo. */
     touch(tr.id); refresh(); return;
   }
   if(el.id&&el.id.indexOf("pc_")===0){
@@ -3412,6 +3411,16 @@ document.addEventListener("focusout",e=>{
 
 document.addEventListener("change",e=>{
   const el=e.target;
+  /* sincroniza campos → calendário ao terminar de editar (sair do campo), não a cada tecla.
+     Mantém a mão dupla sem fazer a tela saltar para o topo enquanto você digita. */
+  if(el.dataset && el.dataset.p){
+    const [k]=el.dataset.p.split("."), tr=trip();
+    if(tr && !tr._sync && (tr.agenda&&tr.agenda.length) && (k==="passagens"||k==="hospedagem"||k==="atracoes")){
+      tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false;
+      touch(tr.id); render();
+      return;
+    }
+  }
   if(el.id==="hotquartos"||el.id==="hotcafe"){
     const tr=trip(); if(!tr) return;
     if(el.id==="hotquartos") tr.quartos=Math.max(1,num(el.value)||1);

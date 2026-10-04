@@ -2152,6 +2152,119 @@ function baixarCalendario(){
   toast("Calendário baixado");
 }
 
+/* ===================== sincronização campos ⇄ calendário =====================
+   Regra: quem editou por último manda.
+   - Passagem (data, de→para)   ⇄  marco de viagem   (src "p:<id>")
+   - Hospedagem (local, in/out) ⇄  marco de estadia  (src "h:<id>")
+   - Atrações (local)           →  atividade do dia (só campos→calendário; sem valores)
+   Atividades/notas digitadas no calendário nunca são apagadas pela sincronização. */
+
+function _norm(s){ return (s||"").trim(); }
+
+/* Reconstrói os marcos a partir de passagens/hospedagens.
+   Mantém TODOS os marcos manuais (sem src) e adiciona os derivados dos campos,
+   pulando apenas o derivado que seria duplicata exata de um marco já presente
+   (mesma data + tipo + destino/local). Assim os dois lados convivem sem apagar nada
+   e sem criar cópias idênticas. */
+function _assinatura(m){
+  return m.tipo==="viagem"
+    ? "v|"+(m.data||"")+"|"+_norm(m.de).toLowerCase()+"→"+_norm(m.para).toLowerCase()
+    : "e|"+(m.data||"")+"|"+(m.ate||"")+"|"+_norm(m.local).toLowerCase();
+}
+function marcosDeCampos(tr){
+  const manuais=(tr.marcos||[]).filter(m=>!m.src);
+  const vistos=new Set(manuais.map(_assinatura));
+  const derivados=[];
+  (tr.passagens||[]).forEach(p=>{
+    if(!p.data || (!_norm(p.de) && !_norm(p.para))) return;
+    const m={id:uid(),src:"p:"+p.id,tipo:"viagem",data:p.data,de:_norm(p.de),para:_norm(p.para)};
+    const a=_assinatura(m); if(vistos.has(a)) return; vistos.add(a);
+    derivados.push(m);
+  });
+  (tr.hospedagem||[]).forEach(h=>{
+    if(!_norm(h.local) || !h.checkin) return;
+    const ate = h.checkout || h.checkin;
+    const m={id:uid(),src:"h:"+h.id,tipo:"estadia",data:h.checkin,ate:ate,local:_norm(h.local)};
+    const a=_assinatura(m); if(vistos.has(a)) return; vistos.add(a);
+    derivados.push(m);
+  });
+  return manuais.concat(derivados);
+}
+
+/* Anexa as atrações como atividade dos dias cuja cidade bate com o "local" da atração. */
+function anexarAtracoes(tr){
+  const atr=(tr.atracoes||[]).filter(a=>_norm(a.local));
+  if(!atr.length) return;
+  const porLocal={};
+  atr.forEach(a=>{ const k=_norm(a.local).toLowerCase(); (porLocal[k]=porLocal[k]||[]).push(_norm(a.local)); });
+  (tr.agenda||[]).forEach(d=>{
+    const cid=_norm(d.cidade).toLowerCase(); if(!cid) return;
+    if(porLocal[cid] && !/Atrações:/.test(d.atividade||"")){
+      const nomes=[...new Set((tr.atracoes||[]).filter(a=>_norm(a.local).toLowerCase()===cid).map(a=>_norm(a.local)))];
+      /* não sobrescreve a atividade; só sinaliza que há atrações previstas, se o dia estiver vazio */
+      if(!_norm(d.atividade)) d.atividade = "Atrações previstas";
+    }
+  });
+}
+
+/* campos → calendário: regenera marcos e agenda, preservando atividade/nota por data. */
+function sincCamposParaCalendario(tr){
+  tr.marcos=marcosDeCampos(tr);
+  const base=expandirMarcos(tr);
+  if(!base.length){ return; }
+  const antigos={}; (tr.agenda||[]).forEach(a=>{ antigos[a.data]=a; });
+  tr.agenda=base.map(b=>{
+    const prev=antigos[b.data]||{};
+    return {
+      id:uid(), data:b.data,
+      cidade: b.local || prev.cidade || "",
+      atividade: b.atividade || prev.atividade || "",
+      nota: prev.nota || ""
+    };
+  });
+  anexarAtracoes(tr);
+}
+
+/* calendário → campos: um marco (viagem/estadia) atualiza a passagem/hospedagem de origem,
+   ou cria uma nova quando foi adicionado à mão no calendário. */
+function sincMarcoParaCampos(tr,m){
+  if(!m) return;
+  if(m.tipo==="viagem"){
+    tr.passagens=tr.passagens||[];
+    let p = m.src && m.src.startsWith("p:") ? (tr.passagens||[]).find(x=>("p:"+x.id)===m.src) : null;
+    if(!p){
+      p=Object.assign({id:uid()}, CATMAP.passagens.add);
+      tr.passagens.push(p); m.src="p:"+p.id;
+    }
+    p.data=m.data||""; p.de=_norm(m.de); p.para=_norm(m.para);
+  }else{
+    tr.hospedagem=tr.hospedagem||[];
+    let h = m.src && m.src.startsWith("h:") ? (tr.hospedagem||[]).find(x=>("h:"+x.id)===m.src) : null;
+    if(!h){
+      h=Object.assign({id:uid()}, CATMAP.hospedagem.add);
+      tr.hospedagem.push(h); m.src="h:"+h.id;
+    }
+    h.local=_norm(m.local); h.checkin=m.data||"";
+    if(m.ate){ h.checkout=m.ate; const n=difData(h.checkin,h.checkout); if(n>=1) h.dias=n; }
+  }
+}
+
+/* quando um dia do calendário muda de cidade/data, reflete no marco de estadia correspondente
+   (os dias não viram passagem; só a estadia do período é ajustada pelo local). */
+function sincDiaParaCampos(tr,d){
+  if(!d || !d.data) return;
+  /* encontra o marco de estadia que cobre essa data */
+  const dt=calDate(d.data); if(!dt) return;
+  const est=(tr.marcos||[]).filter(m=>m.tipo==="estadia").find(m=>{
+    const a=calDate(m.data), b=calDate(m.ate||m.data);
+    return a&&b&&dt>=a&&dt<=b;
+  });
+  if(est && _norm(d.cidade) && _norm(d.cidade)!==_norm(est.local)){
+    est.local=_norm(d.cidade);
+    sincMarcoParaCampos(tr,est);
+  }
+}
+
 function secaoCalendario(t){
   const aberto=!!(state.abertos&&state.abertos.calendario);
   const marcos=Array.isArray(t.marcos)?t.marcos:[];
@@ -3093,6 +3206,7 @@ document.addEventListener("click",e=>{
     tr[cat.key]=tr[cat.key]||[];
     tr[cat.key].push(Object.assign({id:uid()},cat.add));
     state.abertos[cat.key]=true;
+    if((tr.agenda&&tr.agenda.length)&&(cat.key==="passagens"||cat.key==="hospedagem"||cat.key==="atracoes")){ tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false; }
     touch(tr.id); render();
     const rows=document.querySelectorAll(`[data-cat="${cat.key}"] .lrow input`);
     if(rows.length) rows[rows.length-1].focus();
@@ -3100,7 +3214,9 @@ document.addEventListener("click",e=>{
   }
   if(t.dataset.del){
     const [k,id]=t.dataset.del.split("."), tr=trip(); if(!tr) return;
-    tr[k]=tr[k].filter(r=>r.id!==id); touch(tr.id); render(); return;
+    tr[k]=tr[k].filter(r=>r.id!==id);
+    if((tr.agenda&&tr.agenda.length)&&(k==="passagens"||k==="hospedagem"||k==="atracoes")){ tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false; }
+    touch(tr.id); render(); return;
   }
   if(t.dataset.cur){
     const [k,id]=t.dataset.cur.split("."), tr=trip(); if(!tr) return;
@@ -3186,6 +3302,10 @@ document.addEventListener("input",e=>{
       sincronizarPeriodo(r,cps,campo,0);
       pintarPeriodo(c=>`[data-p="hospedagem.${id}.${c}"]`, r, cps, campo);
     }
+    if(!tr._sync && (tr.agenda&&tr.agenda.length) && (k==="passagens"||k==="hospedagem"||k==="atracoes")){
+      tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false;
+      touch(tr.id); render(); return;
+    }
     touch(tr.id); refresh(); return;
   }
   if(el.id&&el.id.indexOf("pc_")===0){
@@ -3214,14 +3334,15 @@ document.addEventListener("input",e=>{
     const [id,campo]=el.dataset.mk.split("."), tr=trip(); if(!tr) return;
     const m=(tr.marcos||[]).find(x=>x.id===id); if(!m) return;
     m[campo]=el.value;
-    if(campo==="tipo") render();
-    else touch(tr.id);
-    return;
+    if(campo==="tipo"){ render(); return; }
+    if(!tr._sync){ tr._sync=true; sincMarcoParaCampos(tr,m); tr._sync=false; }
+    touch(tr.id); return;
   }
   if(el.dataset.cal){
     const [id,campo]=el.dataset.cal.split("."), tr=trip(); if(!tr) return;
     const d=(tr.agenda||[]).find(x=>x.id===id); if(!d) return;
     d[campo]=el.value;
+    if(!tr._sync && (campo==="cidade"||campo==="data")){ tr._sync=true; sincDiaParaCampos(tr,d); tr._sync=false; }
     touch(tr.id); return;
   }
   if(el.dataset.r){

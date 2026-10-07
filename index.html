@@ -249,6 +249,13 @@ main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
 .vooesc .direto{color:var(--green)}
 .voodur{grid-column:1/3;font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
 .voopreco{grid-row:1/3;grid-column:3;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.vooctrl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 11px}
+.vooctrl .hint{align-self:center;margin:0}
+.vooajuste{margin-left:auto;display:flex;align-items:center;gap:7px;
+  font-size:11.5px;color:var(--ink-3)}
+.vooajuste b{font-weight:600;color:var(--ink-2)}
+.vooajuste .btn{padding:2px 8px;font-size:11px}
+.voopreco i.rot{color:var(--ink-2);font-weight:500}
 .voopreco b{display:block;font-size:16px;font-weight:600}
 .voopreco i{display:block;font-style:normal;font-size:10.5px;color:var(--ink-3)}
 .hotcfg{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:0 0 14px;
@@ -867,6 +874,7 @@ function migrarViagem(t){
   if(t.mostrarEm==="FX") t.mostrarEm=t.moeda||"BRL";   /* formato antigo */
   if(!t.classeVoo) t.classeVoo="ECONOMY";
   if(t.precoVooTotal===undefined) t.precoVooTotal=true;
+  if(!t.vooMostrar) t.vooMostrar="pessoa";
   if(!t.quartos) t.quartos=Math.max(1,Math.ceil(totalPax(t)/2));
   if(t.soCafe===undefined) t.soCafe=false;
   if(!t.plano||typeof t.plano!=="object") t.plano={};
@@ -928,7 +936,7 @@ function novaViagem(d){
     moeda:d.moeda||"EUR", cambio:num(d.cambio)||1,
     meta:0, metaCur:"FX", reserva:0, reservaCur:"BRL", reservaFixaV2:true, guardado:0, guardadoCur:"BRL",
     cambioAuto:true, iofOn:false, iof:3.5, cambioFonte:"", cambioEm:"", roteiro:[], locais:[],
-    classeVoo:"ECONOMY", precoVooTotal:true, quartos:0, soCafe:false,
+    classeVoo:"ECONOMY", precoVooTotal:true, vooMostrar:"pessoa", quartos:0, soCafe:false,
     guardados:[], mostrarEm:"BRL", taxas:{}, obs:""
   };
   for(const c of CATS) t[c.key]=[];
@@ -1439,12 +1447,18 @@ function modalVoos(){
         : `Preço <b>dentro do normal</b> para esta rota: entre ${brl(f.limiteBaixo)} e ${brl(f.limiteAlto)}.`;
       miolo+=`<p class="aviso ${f.nivel==="baixo"?"bom":(f.nivel==="alto"?"ruim":"neutro")}">${txt}</p>`;
     }
-    miolo+=`<div class="mapacts" style="margin:0 0 10px">
-      <span class="hint" style="align-self:center">O preço da API é</span>
+    const destPessoa = (t.vooMostrar||"pessoa")==="pessoa";
+    miolo+=`<div class="vooctrl">
+      <span class="hint">Mostrar em destaque</span>
       <div class="seg">
-        <button data-precovoo="total" aria-pressed="${t.precoVooTotal}">total das ${pax}</button>
-        <button data-precovoo="pessoa" aria-pressed="${!t.precoVooTotal}">por pessoa</button>
-      </div></div>`;
+        <button data-voomostrar="pessoa" aria-pressed="${destPessoa}">por pessoa</button>
+        <button data-voomostrar="total" aria-pressed="${!destPessoa}">as ${pax} pessoas</button>
+      </div>
+      <span class="vooajuste">Os preços do Google são
+        <b>${t.precoVooTotal?`o total das ${pax}`:"por pessoa"}</b>
+        <button class="btn small ghost" data-precovoo="${t.precoVooTotal?"pessoa":"total"}">corrigir</button>
+      </span>
+    </div>`;
     miolo+=`<div class="voolista">`;
     v.lista.forEach((o,i)=>{
       const porPessoa = t.precoVooTotal ? o.preco/pax : o.preco;
@@ -1455,7 +1469,10 @@ function modalVoos(){
         <span class="voocia">${esc(o.cias.join(" / "))}${o.melhor?`<i class="tag">melhor</i>`:""}</span>
         <span class="vooesc">${escTxt}</span>
         <span class="voodur">voo ${hm(o.duracao)}${o.espera?` · espera ${hm(o.espera)}`:""}</span>
-        <span class="voopreco"><b>${brl(porPessoa)}</b><i>por pessoa · ${brl(total)} no total</i></span>
+        <span class="voopreco">
+          <b>${brl(destPessoa?porPessoa:total)}</b>
+          <i class="rot">${destPessoa?"por pessoa":`as ${pax} pessoas`}</i>
+          <i>${destPessoa?`${brl(total)} as ${pax} pessoas`:`${brl(porPessoa)} por pessoa`}</i></span>
       </button>`;
     });
     miolo+=`</div>`;
@@ -2508,6 +2525,10 @@ document.addEventListener("click",e=>{
     return;
   }
   if(t.dataset.usarvoo!==undefined){ usarVoo(+t.dataset.usarvoo); return; }
+  if(t.dataset.voomostrar){
+    const tr=trip(); if(!tr) return;
+    tr.vooMostrar=t.dataset.voomostrar; touch(tr.id); renderModal(); return;
+  }
   if(t.dataset.precovoo){
     const tr=trip(); if(!tr) return;
     tr.precoVooTotal = t.dataset.precovoo==="total";

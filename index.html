@@ -224,6 +224,11 @@ main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
 .delmeio{background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:15px;
   line-height:1;padding:0 2px}
 .delmeio:hover{color:var(--rose)}
+.meiostab .lsub{background:var(--panel-2)}
+.meiostab .lsub .cell{font-size:12.5px;color:var(--ink-2)}
+.meiostab .lsub .rowtot{font-size:13px;font-variant-numeric:tabular-nums}
+.meiostab .lsub.ultima{border-radius:0 0 8px 8px}
+.meiostab .rowtot.pos{color:var(--green)}
 .meiostab .rowtot.ok{color:var(--ink-3)}
 .meiostab .rowtot.neg{color:var(--rose)}
 .obscampo{width:100%;background:var(--panel);border:1px solid var(--rule);border-radius:8px;
@@ -1332,29 +1337,49 @@ function pintarMeios(){
   const t=trip(); if(!t) return;
   const tab=document.querySelector(".meiostab"); if(!tab) return;
   const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
-  const tx=taxaDeExibicao(t,alvo)||1, mostra=v=>fmt(v/tx);
-  const linhas=linhasDoMeio(t), corpo=tab.querySelectorAll(".lrow");
+  const tx=taxaDeExibicao(t,alvo)||1, mostra=v=>sim+" "+fmt(v/tx);
+  const cls=v=>Math.abs(v)<0.005?"ok":(v<0?"neg":"");
+  const põe=(sel,i,txt,klass)=>{
+    const l=tab.querySelector('[data-mrow="'+sel+'"]'); if(!l) return;
+    const cels=l.querySelectorAll(".rowtot");
+    if(!cels[i]) return;
+    const b=cels[i].querySelector("b");
+    (b||cels[i]).textContent=txt;
+    cels[i].className="rowtot "+(klass||"");
+  };
   let totFalta=0;
-  linhas.forEach((l,i)=>{
+  linhasDoMeio(t).forEach(l=>{
     const falta=custoDaLinha(t,l.k,c)-porCategoria(t,l.k);
     totFalta+=falta;
-    const cel=corpo[i] && corpo[i].querySelector(".rowtot");
-    if(cel){
-      cel.textContent = Math.abs(falta)<0.005 ? "—" : sim+" "+mostra(falta);
-      cel.className = "rowtot "+(Math.abs(falta)<0.005?"ok":(falta<0?"neg":""));
-    }
+    põe("cat:"+l.k, 0, Math.abs(falta)<0.005?"—":mostra(falta), cls(falta));
   });
-  const tot=corpo[linhas.length];
-  if(tot){
-    const cels=tot.querySelectorAll(".rowtot b");
-    ms.forEach((m,i)=>{ if(cels[i]) cels[i].textContent=sim+" "+mostra(porMeio(t,m.id)); });
-    const ult=cels[ms.length];
-    if(ult){
-      ult.textContent = Math.abs(totFalta)<0.005 ? "—" : sim+" "+mostra(totFalta);
-      ult.parentElement.className = "rowtot "+(Math.abs(totFalta)<0.005?"ok":(totFalta<0?"neg":""));
-    }
-  }
+  ms.forEach((m,i)=>{
+    const plan=porMeio(t,m.id), tem=tenhoNoMeio(t,m.nome), falta=plan-tem;
+    põe("total", i, mostra(plan));
+    põe("tenho", i, mostra(tem));
+    põe("faltam", i, Math.abs(falta)<0.005?"—":mostra(falta), falta<0?"pos":"");
+  });
+  põe("total", ms.length, Math.abs(totFalta)<0.005?"—":mostra(totFalta), cls(totFalta));
+  const planT=ms.reduce((a,m)=>a+porMeio(t,m.id),0);
+  const temT=ms.reduce((a,m)=>a+tenhoNoMeio(t,m.nome),0);
+  põe("tenho", ms.length, mostra(temT));
+  põe("faltam", ms.length, Math.abs(planT-temT)<0.005?"—":mostra(planT-temT), planT-temT<0?"pos":"");
 }
+
+/* O que já está guardado em cada meio sai das fontes lançadas acima: casa pelo
+   nome, ignorando acento e caixa — a fonte "Espécie" alimenta a coluna "espécie". */
+function chaveNome(s){
+  return String(s||"").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
+}
+function tenhoNoMeio(t,nome){
+  const alvo=chaveNome(nome); if(!alvo) return 0;
+  return (t.guardados||[]).reduce((a,g)=>chaveNome(g.fonte)===alvo?a+valorEmBRL(t,g):a,0);
+}
+function fontesSemMeio(t){
+  const nomes=meiosDe(t).map(m=>chaveNome(m.nome)).filter(Boolean);
+  return (t.guardados||[]).filter(g=>valorEmBRL(t,g)>0 && nomes.indexOf(chaveNome(g.fonte))<0);
+}
+
 function painelMeios(t){
   const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
   const tx=taxaDeExibicao(t,alvo)||1;
@@ -1381,7 +1406,7 @@ function painelMeios(t){
     const custo=custoDaLinha(t,l.k,c), posto=porCategoria(t,l.k), falta=custo-posto;
     totFalta+=falta;
     const cls = Math.abs(falta)<0.005 ? "ok" : (falta<0 ? "neg" : "");
-    h+=`<div class="lrow" style="grid-template-columns:var(--g)">
+    h+=`<div class="lrow" data-mrow="cat:${l.k}" style="grid-template-columns:var(--g)">
       <div class="cell wide" data-l="Categoria"><span class="pt" style="background:${l.cor}"></span>${esc(l.nome)}</div>
       ${ms.map(m=>`<div class="cell" data-l="${esc(m.nome)}">
         <input type="text" inputmode="decimal" class="ta-r" data-meio="${l.k}:${m.id}" data-n="2"
@@ -1390,22 +1415,45 @@ function painelMeios(t){
     </div>`;
   });
 
-  const totGeral=ms.reduce((a,m)=>a+porMeio(t,m.id),0);
-  h+=`<div class="lrow ltotal" style="grid-template-columns:var(--g)">
-      <div class="cell wide"><b>Total</b></div>
+  const planT=ms.reduce((a,m)=>a+porMeio(t,m.id),0);
+  const temT=ms.reduce((a,m)=>a+tenhoNoMeio(t,m.nome),0);
+  h+=`<div class="lrow ltotal" data-mrow="total" style="grid-template-columns:var(--g)">
+      <div class="cell wide"><b>Total planejado</b></div>
       ${ms.map(m=>`<div class="rowtot"><b>${sim} ${mostra(porMeio(t,m.id))}</b></div>`).join("")}
       <div class="rowtot ${Math.abs(totFalta)<0.005?"ok":(totFalta<0?"neg":"")}">
         <b>${Math.abs(totFalta)<0.005?"—":sim+" "+mostra(totFalta)}</b></div>
     </div>
+    <div class="lrow lsub" data-mrow="tenho" style="grid-template-columns:var(--g)">
+      <div class="cell wide">Já tenho</div>
+      ${ms.map(m=>`<div class="rowtot" data-l="${esc(m.nome)}">${sim} ${mostra(tenhoNoMeio(t,m.nome))}</div>`).join("")}
+      <div class="rowtot">${sim} ${mostra(temT)}</div>
+    </div>
+    <div class="lrow lsub ultima" data-mrow="faltam" style="grid-template-columns:var(--g)">
+      <div class="cell wide"><b>Faltam comprar</b></div>
+      ${ms.map(m=>{const f=porMeio(t,m.id)-tenhoNoMeio(t,m.nome);
+        return `<div class="rowtot ${f<0?"pos":""}" data-l="${esc(m.nome)}">${
+          Math.abs(f)<0.005?"—":sim+" "+mostra(f)}</div>`;}).join("")}
+      <div class="rowtot ${planT-temT<0?"pos":""}">${
+        Math.abs(planT-temT)<0.005?"—":sim+" "+mostra(planT-temT)}</div>
+    </div>
     </div>
     <button class="addrow" data-addmeio="1">+ adicionar meio</button>`;
+
+  /* fontes cujo nome não bate com nenhuma coluna ficariam invisíveis aqui */
+  const soltas=fontesSemMeio(t);
+  if(soltas.length){
+    const nomes=[...new Set(soltas.map(g=>g.fonte||"sem nome"))];
+    h+=`<p class="aviso neutro">${soltas.length===1?"A fonte":"As fontes"}
+      <b>${nomes.map(esc).join(", ")}</b> não ${soltas.length===1?"aparece":"aparecem"} acima:
+      nenhuma coluna tem esse nome. Renomeie a coluna ou a fonte para que casem.</p>`;
+  }
 
   /* o que a distribuição diz sobre o orçamento */
   const custoTot=num(c.total);
   if(Math.abs(totFalta)>=0.005){
     h+= totFalta>0
       ? `<p class="aviso neutro">Faltam <b>${sim} ${mostra(totFalta)}</b> sem meio definido —
-         a viagem custa ${sim} ${mostra(custoTot)} e você distribuiu ${sim} ${mostra(totGeral)}.</p>`
+         a viagem custa ${sim} ${mostra(custoTot)} e você distribuiu ${sim} ${mostra(planT)}.</p>`
       : `<p class="aviso ruim">Você distribuiu <b>${sim} ${mostra(-totFalta)}</b> a mais do que o custo da viagem.</p>`;
   }else if(custoTot>0){
     h+=`<p class="aviso bom">Todo o custo da viagem está distribuído entre os meios.</p>`;

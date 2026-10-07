@@ -213,6 +213,19 @@ main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
 .lrow input:focus{outline:none;border-bottom-color:var(--green);background:var(--panel-2)}
 .lrow input::placeholder{color:var(--ink-3);opacity:.7}
 .ta-r{text-align:right}
+.meiostit{margin:20px 0 9px}
+.meiostit h4{font-size:14px;margin:0 0 2px}
+.meiostit p{font-size:11.5px;color:var(--ink-3);margin:0;max-width:62ch}
+.meiostab .lhead{align-items:end}
+.meiocab{display:flex;align-items:center;gap:3px}
+.meiocab input{width:100%;min-width:0;background:var(--panel);border:1px solid var(--rule);
+  border-radius:5px;padding:3px 6px;font-size:12px;font-family:inherit;color:var(--ink)}
+.meiocab input:focus{outline:none;border-color:var(--green)}
+.delmeio{background:none;border:0;color:var(--ink-3);cursor:pointer;font-size:15px;
+  line-height:1;padding:0 2px}
+.delmeio:hover{color:var(--rose)}
+.meiostab .rowtot.ok{color:var(--ink-3)}
+.meiostab .rowtot.neg{color:var(--rose)}
 .obscampo{width:100%;background:var(--panel);border:1px solid var(--rule);border-radius:8px;
   padding:11px 13px;font-family:inherit;font-size:14px;line-height:1.55;color:var(--ink);
   resize:vertical;min-height:140px}
@@ -1294,10 +1307,116 @@ function painelReserva(t){
     </div>
   </section>`;
 }
+/* ===================== onde comprar cada parte =====================
+   Matriz categoria × meio de pagamento: quanto de cada categoria sai em
+   espécie, no Wise, no cartão. Serve para saber quanta moeda comprar de
+   cada jeito. Os valores ficam guardados em reais, como o resto do app,
+   e são exibidos na moeda escolhida logo acima. */
+function meiosDe(t){
+  if(!Array.isArray(t.meios) || !t.meios.length)
+    t.meios=[{id:uid(),nome:"Espécie"},{id:uid(),nome:"Wise"},{id:uid(),nome:"Cartão"}];
+  return t.meios;
+}
+function linhasDoMeio(t){
+  return CATS.map(c=>({k:c.key, nome:c.nome, cor:c.cor}))
+    .concat([{k:"reserva", nome:"Reserva", cor:"var(--slate)"}]);
+}
+function valMeio(t,cat,mid){ return num((t.planoMeio||{})[cat+":"+mid]); }
+function porMeio(t,mid){ return linhasDoMeio(t).reduce((a,l)=>a+valMeio(t,l.k,mid),0); }
+function porCategoria(t,cat){ return meiosDe(t).reduce((a,m)=>a+valMeio(t,cat,m.id),0); }
+function custoDaLinha(t,k,c){ return k==="reserva" ? num(c.reserva) : num(c.cats[k]); }
+
+/* Atualiza só os números da matriz. Redesenhar a seção inteira a cada tecla
+   tiraria o cursor do campo no meio do número. */
+function pintarMeios(){
+  const t=trip(); if(!t) return;
+  const tab=document.querySelector(".meiostab"); if(!tab) return;
+  const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
+  const tx=taxaDeExibicao(t,alvo)||1, mostra=v=>fmt(v/tx);
+  const linhas=linhasDoMeio(t), corpo=tab.querySelectorAll(".lrow");
+  let totFalta=0;
+  linhas.forEach((l,i)=>{
+    const falta=custoDaLinha(t,l.k,c)-porCategoria(t,l.k);
+    totFalta+=falta;
+    const cel=corpo[i] && corpo[i].querySelector(".rowtot");
+    if(cel){
+      cel.textContent = Math.abs(falta)<0.005 ? "—" : sim+" "+mostra(falta);
+      cel.className = "rowtot "+(Math.abs(falta)<0.005?"ok":(falta<0?"neg":""));
+    }
+  });
+  const tot=corpo[linhas.length];
+  if(tot){
+    const cels=tot.querySelectorAll(".rowtot b");
+    ms.forEach((m,i)=>{ if(cels[i]) cels[i].textContent=sim+" "+mostra(porMeio(t,m.id)); });
+    const ult=cels[ms.length];
+    if(ult){
+      ult.textContent = Math.abs(totFalta)<0.005 ? "—" : sim+" "+mostra(totFalta);
+      ult.parentElement.className = "rowtot "+(Math.abs(totFalta)<0.005?"ok":(totFalta<0?"neg":""));
+    }
+  }
+}
+function painelMeios(t){
+  const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
+  const tx=taxaDeExibicao(t,alvo)||1;
+  const mostra=v=>fmt(v/tx);                       /* reais → moeda escolhida */
+  const grid=`minmax(104px,1fr) repeat(${ms.length},minmax(92px,1fr)) minmax(96px,auto)`;
+
+  let h=`<div class="meiostit">
+      <h4>Onde vou comprar cada parte</h4>
+      <p>Quanto de cada categoria você pretende pagar em cada meio. Os valores estão em
+        <b>${esc(sim)}</b> — troque no seletor acima.</p>
+    </div>
+    <div class="ltable meiostab" style="--g:${grid}">
+      <div class="lhead" style="grid-template-columns:var(--g)">
+        <div>Categoria</div>
+        ${ms.map(m=>`<div class="meiocab"><input type="text" data-meionome="${m.id}"
+            value="${esc(m.nome)}" placeholder="Meio">
+          ${ms.length>1?`<button class="delmeio" data-delmeio="${m.id}"
+            title="Remover coluna" aria-label="Remover coluna">×</button>`:""}</div>`).join("")}
+        <div class="ta-r">Falta definir</div>
+      </div>`;
+
+  let totFalta=0;
+  linhasDoMeio(t).forEach(l=>{
+    const custo=custoDaLinha(t,l.k,c), posto=porCategoria(t,l.k), falta=custo-posto;
+    totFalta+=falta;
+    const cls = Math.abs(falta)<0.005 ? "ok" : (falta<0 ? "neg" : "");
+    h+=`<div class="lrow" style="grid-template-columns:var(--g)">
+      <div class="cell wide" data-l="Categoria"><span class="pt" style="background:${l.cor}"></span>${esc(l.nome)}</div>
+      ${ms.map(m=>`<div class="cell" data-l="${esc(m.nome)}">
+        <input type="text" inputmode="decimal" class="ta-r" data-meio="${l.k}:${m.id}" data-n="2"
+          value="${valMeio(t,l.k,m.id)?mostra(valMeio(t,l.k,m.id)):""}" placeholder="—"></div>`).join("")}
+      <div class="rowtot ${cls}" data-l="Falta definir">${Math.abs(falta)<0.005?"—":sim+" "+mostra(falta)}</div>
+    </div>`;
+  });
+
+  const totGeral=ms.reduce((a,m)=>a+porMeio(t,m.id),0);
+  h+=`<div class="lrow ltotal" style="grid-template-columns:var(--g)">
+      <div class="cell wide"><b>Total</b></div>
+      ${ms.map(m=>`<div class="rowtot"><b>${sim} ${mostra(porMeio(t,m.id))}</b></div>`).join("")}
+      <div class="rowtot ${Math.abs(totFalta)<0.005?"ok":(totFalta<0?"neg":"")}">
+        <b>${Math.abs(totFalta)<0.005?"—":sim+" "+mostra(totFalta)}</b></div>
+    </div>
+    </div>
+    <button class="addrow" data-addmeio="1">+ adicionar meio</button>`;
+
+  /* o que a distribuição diz sobre o orçamento */
+  const custoTot=num(c.total);
+  if(Math.abs(totFalta)>=0.005){
+    h+= totFalta>0
+      ? `<p class="aviso neutro">Faltam <b>${sim} ${mostra(totFalta)}</b> sem meio definido —
+         a viagem custa ${sim} ${mostra(custoTot)} e você distribuiu ${sim} ${mostra(totGeral)}.</p>`
+      : `<p class="aviso ruim">Você distribuiu <b>${sim} ${mostra(-totFalta)}</b> a mais do que o custo da viagem.</p>`;
+  }else if(custoTot>0){
+    h+=`<p class="aviso bom">Todo o custo da viagem está distribuído entre os meios.</p>`;
+  }
+  return h;
+}
+
 function painelPoupanca(t){
   const gs=t.guardados||[];
   const sym=MOEDAS[t.moeda]?MOEDAS[t.moeda].s:t.moeda;
-  const grid="minmax(0,1.3fr) 118px 128px 112px minmax(96px,auto) 26px";
+  const grid="minmax(104px,1.3fr) 112px 118px 104px minmax(92px,auto) 26px";
   const moedaOpts=m=>["BRL"].concat(Object.keys(MOEDAS))
     .map(k=>`<option value="${k}" ${k===m?"selected":""}>${k==="BRL"?"BRL — Real":k+" — "+MOEDAS[k].n}</option>`).join("");
 
@@ -1343,6 +1462,8 @@ function painelPoupanca(t){
     <div class="mapacts">
       <button class="btn small" data-act="taxasguardado">Atualizar cotações</button>
     </div>
+
+    ${painelMeios(t)}
 
     <div class="reserva" style="margin-top:14px">
       <div class="kv"><span>Total que já tenho</span><b data-calc="gtotal"></b></div>
@@ -2516,6 +2637,20 @@ document.addEventListener("click",e=>{
     touch(tr.id); render(); return;
   }
 
+  if(t.dataset.addmeio){
+    const tr=trip(); if(!tr) return;
+    meiosDe(tr).push({id:uid(),nome:""}); touch(tr.id); render(); return;
+  }
+  if(t.dataset.delmeio){
+    const tr=trip(); if(!tr) return;
+    const mid=t.dataset.delmeio;
+    tr.meios=meiosDe(tr).filter(m=>m.id!==mid);
+    /* leva junto os valores da coluna, senão ficam órfãos no objeto */
+    if(tr.planoMeio) Object.keys(tr.planoMeio).forEach(k=>{
+      if(k.endsWith(":"+mid)) delete tr.planoMeio[k];
+    });
+    touch(tr.id); render(); return;
+  }
   if(act==="taxasguardado"){ atualizarTaxasGuardadas(); return; }
   if(t.dataset.busca){
     const [cat,id]=t.dataset.busca.split(":");
@@ -2732,6 +2867,20 @@ document.addEventListener("input",e=>{
   const el=e.target;
   if(el.isContentEditable) return;
 
+  if(el.dataset.meio){
+    const tr=trip(); if(!tr) return;
+    const [cat,mid]=el.dataset.meio.split(":");
+    const tx=taxaDeExibicao(tr,moedaMostrada(tr))||1;
+    tr.planoMeio=tr.planoMeio||{};
+    const v=num(el.value)*tx;                 /* volta para reais */
+    if(v) tr.planoMeio[cat+":"+mid]=v; else delete tr.planoMeio[cat+":"+mid];
+    touch(tr.id); pintarMeios(); return;
+  }
+  if(el.dataset.meionome){
+    const tr=trip(); if(!tr) return;
+    const m=meiosDe(tr).find(x=>x.id===el.dataset.meionome); if(!m) return;
+    m.nome=el.value; touch(tr.id); return;    /* sem redesenhar: tiraria o cursor */
+  }
   if(el.id==="obsviagem"){
     const tr=trip(); if(!tr) return;
     tr.obs=el.value; touch(tr.id);

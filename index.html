@@ -647,6 +647,55 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
   .tmoney{text-align:left;margin-top:8px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none !important;animation:none !important}}
+
+/* ---------- calendário (seção retrátil) ---------- */
+.calsec{margin:14px 0 4px;border:1px solid var(--rule);border-radius:12px;background:var(--panel);overflow:hidden}
+.calsec.aberto{border-color:var(--green)}
+.calhead{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:0;padding:14px 16px;cursor:pointer}
+.calhead:hover .caltit{color:var(--green)}
+.calhead .dot{width:10px;height:10px;border-radius:3px;background:var(--clay);flex:none}
+.calwrap{display:block;min-width:0;flex:1}
+.caltit{display:block;font-family:"Newsreader",serif;font-size:19px;font-weight:500;transition:color .12s}
+.calmeta{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.calsec.aberto .caltit{color:var(--green)}
+.calsec.aberto .calchev{transform:rotate(180deg)}
+.calchev{color:var(--ink-3);transition:transform .22s ease;flex:none}
+.calbody{display:grid;grid-template-rows:0fr;transition:grid-template-rows .22s ease}
+.calbody>div{overflow:hidden}
+.calsec.aberto .calbody{grid-template-rows:1fr}
+.calinner{padding:4px 16px 16px}
+.calacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.calstep{font-family:"Newsreader",serif;font-size:15px;font-weight:600;color:var(--green);margin:0 0 2px}
+/* grade inline no app (prefixo cv-) */
+.calview{margin-top:6px}
+.calview .cv-leg{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 16px;font-size:12.5px;color:var(--ink-2)}
+.calview .cv-lg{display:flex;align-items:center;gap:6px}
+.calview .cv-lg i{width:13px;height:13px;border-radius:3px;border:1px solid;display:inline-block}
+.calview .cv-mes{margin-bottom:22px}
+.calview .cv-mesh{font-family:"Newsreader",serif;font-size:18px;font-weight:600;margin:0 0 8px;color:var(--ink)}
+.calview .cv-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+.calview .cv-dow span{text-align:center;font-size:11.5px;color:var(--ink-3)}
+.calview .cv-grade{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.calview .cv-cel{min-height:84px;border-radius:10px;border:1px solid var(--rule);padding:6px 7px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.calview .cv-vazio{border:none;background:none;min-height:0}
+.calview .cv-fora{background:var(--panel-2);border-color:var(--rule-2)}
+.calview .cv-num{font-size:12.5px;font-weight:600;color:var(--ink-3)}
+.calview .cv-cidade{font-size:12px;font-weight:600;line-height:1.2}
+.calview .cv-ativ{font-size:10.5px;line-height:1.25}
+.calview .cv-tbl{width:100%;border-collapse:collapse;margin-top:6px;font-size:13px}
+.calview .cv-tbl thead th{text-align:left;color:var(--ink-3);font-weight:500;font-size:11.5px;border-bottom:1px solid var(--rule);padding:6px 8px}
+.calview .cv-tbl tbody td{border-bottom:1px solid var(--rule-2);padding:7px 8px;vertical-align:top}
+.calview .cv-ld{white-space:nowrap;color:var(--ink-2)}
+.calview .cv-ld .cv-pt{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:7px;vertical-align:middle}
+.calview .cv-lc{font-weight:600}
+.calview .cv-la{color:var(--ink-2)}
+.calview .cv-ln{color:var(--ink-3)}
+.calview .cv-h3{font-family:"Newsreader",serif;font-size:16px;margin:20px 0 2px;color:var(--ink)}
+@media (max-width:640px){
+  .calview .cv-cel{min-height:62px;padding:4px 5px}
+  .calview .cv-cidade{font-size:11px}
+  .calview .cv-ativ{display:none}
+}
 </style>
 </head>
 <body>
@@ -955,7 +1004,7 @@ function novaViagem(d){
     meta:0, metaCur:"FX", reserva:0, reservaCur:"BRL", reservaFixaV2:true, guardado:0, guardadoCur:"BRL",
     cambioAuto:true, iofOn:false, iof:3.5, cambioFonte:"", cambioEm:"", roteiro:[], locais:[],
     classeVoo:"ECONOMY", precoVooTotal:true, vooMostrar:"pessoa", quartos:0, soCafe:false,
-    guardados:[], mostrarEm:"BRL", taxas:{}, obs:""
+    guardados:[], mostrarEm:"BRL", taxas:{}, obs:"", marcos:[], agenda:[]
   };
   for(const c of CATS) t[c.key]=[];
   return t;
@@ -2095,6 +2144,437 @@ function painelPlano(t){
   return h;
 }
 
+/* ---------------------------- calendário (marcos → dias) ---------------------------- */
+const CAL_DOW=["dom","seg","ter","qua","qui","sex","sáb"];
+const CAL_MES=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+const CAL_CORES=["#E6F1FB|#0C447C|#185FA5","#FAEEDA|#633806|#854F0B","#E1F5EE|#085041|#0F6E56",
+                 "#FBEAF0|#72243E|#993556","#EEEDFE|#26215C|#534AB7","#FAECE7|#712B13|#993C1D",
+                 "#EAF3DE|#173404|#3B6D11","#F1EFE8|#2C2C2A|#5F5E5A"];
+const CAL_COR_VIAGEM="#F1EFE8|#2C2C2A|#5F5E5A".split("|");
+function calISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function calDate(iso){ if(!iso) return null; const p=String(iso).split("-"); if(p.length!==3) return null; const d=new Date(+p[0],+p[1]-1,+p[2]); return isNaN(d)?null:d; }
+function calFmtData(iso){ const d=calDate(iso); if(!d) return esc(iso||""); return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} · ${CAL_DOW[d.getDay()]}`; }
+
+/* Expande os marcos (viagem/estadia) nos dias do período da viagem. */
+function expandirMarcos(t){
+  const ini=calDate(t.inicio), fim=calDate(t.fim);
+  const marcos=Array.isArray(t.marcos)?t.marcos.slice():[];
+  marcos.sort((a,b)=>String(a.data||"").localeCompare(String(b.data||"")));
+  const dias={};
+  marcos.forEach(m=>{
+    if(m.tipo==="viagem"){
+      if(!m.data) return;
+      const di=calDate(m.data); if(!di) return;
+      const iso=calISO(di);
+      dias[iso]=dias[iso]||{viagem:[],local:""};
+      dias[iso].viagem.push({de:m.de||"",para:m.para||""});
+    } else {
+      const di=calDate(m.data); if(!di) return;
+      const df=calDate(m.ate)||di;
+      let d=new Date(di), guard=0;
+      while(d<=df && guard++<800){
+        const iso=calISO(d);
+        dias[iso]=dias[iso]||{viagem:[],local:""};
+        if(m.local && !dias[iso].local) dias[iso].local=m.local;
+        d.setDate(d.getDate()+1);
+      }
+    }
+  });
+  const out=[];
+  if(ini&&fim&&ini<=fim){
+    let d=new Date(ini), guard=0, ultimoLocal="";
+    while(d<=fim && guard++<800){
+      const iso=calISO(d);
+      const info=dias[iso]||{viagem:[],local:""};
+      const atividades=[];
+      info.viagem.forEach(v=>{ atividades.push(`Viajar ${v.de||"?"} → ${v.para||"?"}`); });
+      let localDia;
+      if(info.viagem.length){
+        const destino=info.viagem[info.viagem.length-1].para;
+        localDia = destino || info.local || ultimoLocal;
+      } else {
+        localDia = info.local || ultimoLocal;
+      }
+      if(localDia) ultimoLocal=localDia;
+      out.push({ data:iso, local:localDia, viagem:info.viagem.length>0, atividade:atividades.join(" · ") });
+      d.setDate(d.getDate()+1);
+    }
+  }
+  return out;
+}
+
+/* Gera t.agenda a partir dos marcos, preservando edições manuais por data quando possível. */
+function gerarAgendaDeMarcos(t, silencioso){
+  if(!t.inicio||!t.fim){ if(!silencioso) toast("Defina início e fim da viagem primeiro"); return; }
+  const base=expandirMarcos(t);
+  if(!base.length){ if(!silencioso) toast("Período inválido ou sem marcos"); return; }
+  const antigos={}; (t.agenda||[]).forEach(a=>{ antigos[a.data]=a; });
+  t.agenda=base.map(b=>{
+    const prev=antigos[b.data]||{};
+    return {
+      id:uid(), data:b.data,
+      cidade: b.local || prev.cidade || "",
+      atividade: b.atividade || prev.atividade || "",
+      nota: prev.nota || ""
+    };
+  });
+  t.calView="grade";
+  state.abertos=state.abertos||{}; state.abertos.calendario=true;
+  touch(t.id);
+  if(!silencioso){ render(); toast(`Calendário gerado: ${t.agenda.length} dias`); }
+}
+
+/* Paleta por cidade, determinística a partir da agenda. */
+function calPaletaCidades(ag){
+  const cidades=[...new Set(ag.map(d=>d.cidade).filter(Boolean))];
+  const corDe={}; cidades.forEach((c,i)=>{ corDe[c]=CAL_CORES[i%CAL_CORES.length].split("|"); });
+  return {cidades,corDe};
+}
+
+/* Miolo visual (grade mensal + legenda + lista). Usado inline no app e no arquivo baixado.
+   pfx = prefixo de classe ("" para o arquivo; "cv-" para dentro do app, para não colidir). */
+function calGradeInner(t, pfx){
+  pfx=pfx||"";
+  const ag=(t.agenda||[]).slice().sort((a,b)=>String(a.data).localeCompare(String(b.data)));
+  const {cidades,corDe}=calPaletaCidades(ag);
+  const porMes={};
+  ag.forEach(d=>{ const dt=calDate(d.data); if(!dt) return; const k=`${dt.getFullYear()}-${dt.getMonth()}`; (porMes[k]=porMes[k]||[]).push(d); });
+  let grades="";
+  Object.keys(porMes).sort().forEach(k=>{
+    const [ano,mes]=k.split("-").map(Number);
+    const dias=porMes[k];
+    const offset=new Date(ano,mes,1).getDay();
+    const mapDia={}; dias.forEach(d=>{ mapDia[calDate(d.data).getDate()]=d; });
+    const ultimoDiaMes=new Date(ano,mes+1,0).getDate();
+    let celulas="";
+    for(let i=0;i<offset;i++) celulas+=`<div class="${pfx}cel ${pfx}vazio"></div>`;
+    for(let dia=1;dia<=ultimoDiaMes;dia++){
+      const d=mapDia[dia];
+      if(!d){ celulas+=`<div class="${pfx}cel ${pfx}fora"><span class="${pfx}num">${dia}</span></div>`; continue; }
+      const temViagem=/Viajar/.test(d.atividade||"");
+      const pal = temViagem ? CAL_COR_VIAGEM : (corDe[d.cidade]||CAL_CORES[7].split("|"));
+      const [bg,tx,sub]=pal;
+      const titulo = esc(d.cidade|| (temViagem?"Em trânsito":"") );
+      const ativ = esc(d.atividade||"");
+      celulas+=`<div class="${pfx}cel" style="background:${bg};border-color:${sub}">
+        <span class="${pfx}num" style="color:${tx}">${dia}</span>
+        ${titulo?`<span class="${pfx}cidade" style="color:${tx}">${titulo}</span>`:""}
+        ${ativ?`<span class="${pfx}ativ" style="color:${sub}">${ativ}</span>`:""}
+      </div>`;
+    }
+    grades+=`<div class="${pfx}mes">
+      <h2 class="${pfx}mesh">${CAL_MES[mes]} de ${ano}</h2>
+      <div class="${pfx}dow">${CAL_DOW.map(x=>`<span>${x}</span>`).join("")}</div>
+      <div class="${pfx}grade">${celulas}</div>
+    </div>`;
+  });
+  let lista="";
+  ag.forEach(d=>{
+    const temViagem=/Viajar/.test(d.atividade||"");
+    const pal = temViagem ? CAL_COR_VIAGEM : (corDe[d.cidade]||CAL_CORES[7].split("|"));
+    lista+=`<tr>
+      <td class="${pfx}ld"><span class="${pfx}pt" style="background:${pal[2]}"></span>${calFmtData(d.data)}</td>
+      <td class="${pfx}lc">${esc(d.cidade||"")}</td>
+      <td class="${pfx}la">${esc(d.atividade||"")}</td>
+      <td class="${pfx}ln">${esc(d.nota||"")}</td>
+    </tr>`;
+  });
+  let legenda=cidades.map(c=>{ const [bg,tx,sub]=corDe[c]; return `<span class="${pfx}lg"><i style="background:${bg};border-color:${sub}"></i>${esc(c)}</span>`; }).join("");
+  legenda+=`<span class="${pfx}lg"><i style="background:${CAL_COR_VIAGEM[0]};border-color:${CAL_COR_VIAGEM[2]}"></i>Dia de viagem</span>`;
+  return {grades,lista,legenda};
+}
+
+/* Documento HTML autônomo (download / impressão). */
+function htmlCalendario(t, paraImprimir){
+  const {grades,lista,legenda}=calGradeInner(t,"");
+  const periodo = t.inicio? `${calFmtData(t.inicio)} a ${calFmtData(t.fim)}` : "";
+  const autoprint = paraImprimir ? `<script>window.onload=function(){setTimeout(function(){window.print()},250)}<\/script>` : "";
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendário — ${esc(t.nome||"Viagem")}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1c1c1a;margin:0;padding:28px;background:#fff;line-height:1.5}
+.wrap{max-width:1000px;margin:0 auto}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:30px;margin:0 0 2px}
+.sub{color:#666;font-size:14px;margin-bottom:4px}
+.leg{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0 22px;font-size:12.5px;color:#444}
+.lg{display:flex;align-items:center;gap:6px}
+.lg i{width:13px;height:13px;border-radius:3px;border:1px solid;display:inline-block}
+.mes{margin-bottom:26px;break-inside:avoid}
+.mesh{font-family:Georgia,serif;font-size:19px;font-weight:600;margin:0 0 8px}
+.dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+.dow span{text-align:center;font-size:11.5px;color:#999}
+.grade{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.cel{min-height:88px;border-radius:10px;border:1px solid #e3e3df;padding:6px 7px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.vazio{border:none;background:none}
+.fora{background:#fafaf8;border-color:#eee}
+.num{font-size:12.5px;font-weight:600;color:#999}
+.cidade{font-size:12px;font-weight:600;line-height:1.2}
+.ativ{font-size:10.5px;line-height:1.25}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+thead th{text-align:left;color:#888;font-weight:500;font-size:11.5px;border-bottom:1px solid #e3e3df;padding:6px 8px}
+tbody td{border-bottom:1px solid #f0efec;padding:7px 8px;vertical-align:top}
+.ld{white-space:nowrap;color:#333}
+.ld .pt{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:7px;vertical-align:middle}
+.lc{font-weight:600}
+.la{color:#333}
+.ln{color:#888}
+h3{font-family:Georgia,serif;font-size:17px;margin:26px 0 2px}
+@media print{ body{padding:0} @page{margin:12mm} .cel{min-height:70px} }
+</style></head>
+<body><div class="wrap">
+  <h1>${esc(t.nome||"Viagem")}</h1>
+  <div class="sub">${esc(t.destino||"")}</div>
+  <div class="sub">${periodo}</div>
+  <div class="leg">${legenda}</div>
+  ${grades}
+  <h3>Dia a dia</h3>
+  <table><thead><tr><th>Data</th><th>Cidade</th><th>Atividade</th><th>Nota</th></tr></thead>
+  <tbody>${lista}</tbody></table>
+</div>${autoprint}</body></html>`;
+}
+
+function imprimirCalendario(){
+  const t=trip(); if(!t) return;
+  if(!(t.agenda&&t.agenda.length)){ toast("Gere o calendário primeiro"); return; }
+  const w=window.open("","_blank");
+  if(!w){ toast("Permita pop-ups para imprimir"); return; }
+  w.document.write(htmlCalendario(t,true)); w.document.close();
+}
+function baixarCalendario(){
+  const t=trip(); if(!t) return;
+  if(!(t.agenda&&t.agenda.length)){ toast("Gere o calendário primeiro"); return; }
+  const html=htmlCalendario(t,false);
+  const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  const slug=(t.nome||"viagem").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  a.href=url; a.download=`calendario-${slug||"viagem"}.html`;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); },200);
+  toast("Calendário baixado");
+}
+
+function secaoCalendario(t){
+  const aberto=!!(state.abertos&&state.abertos.calendario);
+  const marcos=Array.isArray(t.marcos)?t.marcos:[];
+  const ag=Array.isArray(t.agenda)?t.agenda:[];
+  const editando = t.calView==="edit";
+
+  const gM="150px 118px minmax(0,1fr) minmax(0,1fr) 26px";
+  let linhasM="";
+  if(!marcos.length){
+    linhasM=`<div class="lrow" style="grid-template-columns:1fr"><div style="color:var(--ink-3);font-size:13.5px;padding:6px 0">Nenhum marco ainda. Adicione as viagens (de → para) e as estadias (onde, até quando).</div></div>`;
+  } else {
+    marcos.forEach(m=>{
+      const ehViagem=m.tipo==="viagem";
+      const selTipo=`<select data-mk="${m.id}.tipo">
+        <option value="estadia" ${!ehViagem?"selected":""}>Estadia</option>
+        <option value="viagem" ${ehViagem?"selected":""}>Viagem</option></select>`;
+      const dataIni=`<input type="date" data-mk="${m.id}.data" value="${esc(m.data||"")}">`;
+      let c3,c4;
+      if(ehViagem){
+        c3=`<input type="text" data-mk="${m.id}.de" value="${esc(m.de||"")}" placeholder="De (ex.: Istambul)">`;
+        c4=`<input type="text" data-mk="${m.id}.para" value="${esc(m.para||"")}" placeholder="Para (ex.: Capadócia)">`;
+      } else {
+        c3=`<input type="text" data-mk="${m.id}.local" value="${esc(m.local||"")}" placeholder="Onde (ex.: Istambul)">`;
+        c4=`<input type="date" data-mk="${m.id}.ate" value="${esc(m.ate||"")}" title="Até quando fica">`;
+      }
+      linhasM+=`<div class="lrow" style="grid-template-columns:var(--g)" data-mkrid="${m.id}">
+        <div class="cell" data-l="Tipo">${selTipo}</div>
+        <div class="cell" data-l="${ehViagem?"Data":"Chegada"}">${dataIni}</div>
+        <div class="cell wide" data-l="${ehViagem?"De":"Onde"}">${c3}</div>
+        <div class="cell wide" data-l="${ehViagem?"Para":"Até"}">${c4}</div>
+        <button class="del" data-delmk="${m.id}" title="Remover marco" aria-label="Remover marco">×</button>
+      </div>`;
+    });
+  }
+
+  let passo3="";
+  if(!ag.length){
+    passo3=`<div class="calstep" style="margin-top:18px">3 · Calendário</div>
+      <p class="hint" style="margin:2px 0">Informe os marcos acima e clique em <b>Gerar calendário</b>.</p>`;
+  } else if(editando){
+    const gD="118px minmax(0,1fr) minmax(0,1.5fr) minmax(0,1.2fr) 26px";
+    let linhasD="";
+    ag.forEach(d=>{
+      linhasD+=`<div class="lrow" style="grid-template-columns:var(--g)" data-calrid="${d.id}">
+        <div class="cell" data-l="Data"><input type="date" data-cal="${d.id}.data" value="${esc(d.data||"")}"></div>
+        <div class="cell" data-l="Cidade"><input type="text" data-cal="${d.id}.cidade" value="${esc(d.cidade||"")}" placeholder="Cidade"></div>
+        <div class="cell wide" data-l="Atividade"><input type="text" data-cal="${d.id}.atividade" value="${esc(d.atividade||"")}" placeholder="O que acontece nesse dia"></div>
+        <div class="cell wide" data-l="Nota"><input type="text" data-cal="${d.id}.nota" value="${esc(d.nota||"")}" placeholder="Observações"></div>
+        <button class="del" data-delcal="${d.id}" title="Remover dia" aria-label="Remover dia">×</button>
+      </div>`;
+    });
+    passo3=`<div class="calstep" style="margin-top:18px">3 · Calendário — edição dia a dia</div>
+      <p class="hint" style="margin:2px 0 8px">Ajuste o que precisar e clique em <b>Concluir edição</b> para voltar ao calendário.</p>
+      <div class="ltable" style="--g:${gD}" data-lista="agenda">
+        <div class="lhead" style="grid-template-columns:var(--g)">
+          <div>Data</div><div>Cidade</div><div>Atividade</div><div>Nota</div><div></div>
+        </div>
+        ${linhasD}
+      </div>
+      <button class="addrow" data-addcal="1">+ adicionar dia</button>
+      <div class="calacts">
+        <button class="btn primary small" data-act="concluircal">Concluir edição</button>
+      </div>`;
+  } else {
+    const {grades,lista,legenda}=calGradeInner(t,"cv-");
+    passo3=`<div class="calstep" style="margin-top:18px">3 · Calendário</div>
+      <div class="calview">
+        <div class="cv-leg">${legenda}</div>
+        ${grades}
+        <h3 class="cv-h3">Dia a dia</h3>
+        <table class="cv-tbl"><thead><tr><th>Data</th><th>Cidade</th><th>Atividade</th><th>Nota</th></tr></thead>
+        <tbody>${lista}</tbody></table>
+      </div>
+      <div class="calacts">
+        <button class="btn small" data-act="editarcal">Editar</button>
+        <button class="btn small" data-act="imprimircal">Imprimir</button>
+        <button class="btn small" data-act="baixarcal">Baixar calendário</button>
+      </div>`;
+  }
+
+  const meta = ag.length ? `${ag.length} ${ag.length===1?"dia":"dias"}` : (marcos.length?`${marcos.length} ${marcos.length===1?"marco":"marcos"} — gere o calendário`:"monte o roteiro");
+
+  return `<div class="calsec${aberto?" aberto":""}" data-calsec="1">
+    <button class="calhead" data-caltoggle="1" aria-expanded="${aberto}">
+      <i class="dot"></i>
+      <span class="calwrap"><span class="caltit">Calendário</span>
+        <span class="calmeta">${meta}</span></span>
+      <svg class="calchev" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="calbody"><div><div class="calinner">
+      <div class="calstep">1 · Período</div>
+      <p class="hint" style="margin:2px 0 10px">A viagem vai de <b>${t.inicio?calFmtData(t.inicio):"—"}</b> a <b>${t.fim?calFmtData(t.fim):"—"}</b>. Ajuste no cabeçalho, se precisar.</p>
+
+      <div class="calstep">2 · Marcos da viagem</div>
+      <p class="hint" style="margin:2px 0 8px">Cada linha é uma <b>viagem</b> (de → para, num dia) ou uma <b>estadia</b> (onde, e até quando). Os dias entre as datas são preenchidos sozinhos.</p>
+      <div class="ltable" style="--g:${gM}" data-lista="marcos">
+        <div class="lhead" style="grid-template-columns:var(--g)">
+          <div>Tipo</div><div>Data</div><div>De / Onde</div><div>Para / Até</div><div></div>
+        </div>
+        ${linhasM}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="addrow" data-addmk="estadia" style="margin:0">+ estadia</button>
+        <button class="addrow" data-addmk="viagem" style="margin:0">+ viagem</button>
+      </div>
+      <div class="calacts">
+        <button class="btn primary small" data-act="gerarcal">Gerar calendário</button>
+
+      </div>
+
+      ${passo3}
+    </div></div></div>
+  </div>`;
+}
+
+/* ===================== sincronização campos ⇄ calendário =====================
+   Regra: quem editou por último manda.
+   - Passagem (data, de→para)   ⇄  marco de viagem   (src "p:<id>")
+   - Hospedagem (local, in/out) ⇄  marco de estadia  (src "h:<id>")
+   - Atrações (local)           →  atividade do dia (só campos→calendário; sem valores)
+   Atividades/notas digitadas no calendário nunca são apagadas pela sincronização. */
+
+function _norm(s){ return (s||"").trim(); }
+
+function _assinatura(m){
+  return m.tipo==="viagem"
+    ? "v|"+(m.data||"")+"|"+_norm(m.de).toLowerCase()+"→"+_norm(m.para).toLowerCase()
+    : "e|"+(m.data||"")+"|"+(m.ate||"")+"|"+_norm(m.local).toLowerCase();
+}
+/* Mantém TODOS os marcos manuais (sem src) e adiciona os derivados dos campos,
+   pulando apenas o derivado que seria duplicata exata de um marco já presente. */
+function marcosDeCampos(tr){
+  const manuais=(tr.marcos||[]).filter(m=>!m.src);
+  const vistos=new Set(manuais.map(_assinatura));
+  const derivados=[];
+  (tr.passagens||[]).forEach(p=>{
+    if(!p.data || (!_norm(p.de) && !_norm(p.para))) return;
+    const m={id:uid(),src:"p:"+p.id,tipo:"viagem",data:p.data,de:_norm(p.de),para:_norm(p.para)};
+    const a=_assinatura(m); if(vistos.has(a)) return; vistos.add(a);
+    derivados.push(m);
+  });
+  (tr.hospedagem||[]).forEach(h=>{
+    if(!_norm(h.local) || !h.checkin) return;
+    const ate = h.checkout || h.checkin;
+    const m={id:uid(),src:"h:"+h.id,tipo:"estadia",data:h.checkin,ate:ate,local:_norm(h.local)};
+    const a=_assinatura(m); if(vistos.has(a)) return; vistos.add(a);
+    derivados.push(m);
+  });
+  return manuais.concat(derivados);
+}
+
+/* Anexa as atrações como atividade dos dias cuja cidade bate com o "local" da atração. */
+function anexarAtracoes(tr){
+  const atr=(tr.atracoes||[]).filter(a=>_norm(a.local));
+  if(!atr.length) return;
+  const porLocal={};
+  atr.forEach(a=>{ const k=_norm(a.local).toLowerCase(); porLocal[k]=1; });
+  (tr.agenda||[]).forEach(d=>{
+    const cid=_norm(d.cidade).toLowerCase(); if(!cid) return;
+    if(porLocal[cid] && !_norm(d.atividade)) d.atividade="Atrações previstas";
+  });
+}
+
+/* campos → calendário: regenera marcos e agenda, preservando atividade/nota por data. */
+function sincCamposParaCalendario(tr){
+  tr.marcos=marcosDeCampos(tr);
+  const base=expandirMarcos(tr);
+  if(!base.length){ return; }
+  const antigos={}; (tr.agenda||[]).forEach(a=>{ antigos[a.data]=a; });
+  tr.agenda=base.map(b=>{
+    const prev=antigos[b.data]||{};
+    return {
+      id:uid(), data:b.data,
+      cidade: b.local || prev.cidade || "",
+      atividade: b.atividade || prev.atividade || "",
+      nota: prev.nota || ""
+    };
+  });
+  anexarAtracoes(tr);
+}
+
+/* calendário → campos: um marco atualiza a passagem/hospedagem de origem, ou cria nova. */
+function sincMarcoParaCampos(tr,m){
+  if(!m) return;
+  if(m.tipo==="viagem"){
+    tr.passagens=tr.passagens||[];
+    let p = m.src && m.src.startsWith("p:") ? (tr.passagens||[]).find(x=>("p:"+x.id)===m.src) : null;
+    if(!p){
+      p=Object.assign({id:uid()}, CATMAP.passagens.add);
+      tr.passagens.push(p); m.src="p:"+p.id;
+    }
+    p.data=m.data||""; p.de=_norm(m.de); p.para=_norm(m.para);
+    if(p.trecho!==undefined) p.trecho=rotaTexto(p);
+  }else{
+    tr.hospedagem=tr.hospedagem||[];
+    let h = m.src && m.src.startsWith("h:") ? (tr.hospedagem||[]).find(x=>("h:"+x.id)===m.src) : null;
+    if(!h){
+      h=Object.assign({id:uid()}, CATMAP.hospedagem.add);
+      tr.hospedagem.push(h); m.src="h:"+h.id;
+    }
+    h.local=_norm(m.local); h.checkin=m.data||"";
+    if(m.ate){ h.checkout=m.ate; const n=difData(h.checkin,h.checkout); if(n>=1) h.dias=n; }
+  }
+}
+
+/* quando um dia do calendário muda de cidade/data, reflete na estadia correspondente. */
+function sincDiaParaCampos(tr,d){
+  if(!d || !d.data) return;
+  const dt=calDate(d.data); if(!dt) return;
+  const est=(tr.marcos||[]).filter(m=>m.tipo==="estadia").find(m=>{
+    const a=calDate(m.data), b=calDate(m.ate||m.data);
+    return a&&b&&dt>=a&&dt<=b;
+  });
+  if(est && _norm(d.cidade) && _norm(d.cidade)!==_norm(est.local)){
+    est.local=_norm(d.cidade);
+    sincMarcoParaCampos(tr,est);
+  }
+}
+
 function painelMapa(t){
   const rs=t.roteiro||[];
   const loc=paradasLocalizadas(t).length;
@@ -2214,6 +2694,8 @@ function viewTrip(){
       <div class="f"><label>R$ por 1 ${esc(sym)}</label><input type="text" inputmode="decimal" data-t="cambio" data-n="4" value="${fmt(num(t.cambio),4)}"></div>
     </div>
   </div>
+
+  ${secaoCalendario(t)}
 
   <div class="layout">
     <div class="catlist">
@@ -2399,9 +2881,12 @@ function refresh(){
     }
   }
   put("plTotal", fmt(planejado));
-  /* Pinta célula por célula, do mês mais próximo para o mais distante e, dentro de
-     cada mês, de cima para baixo. Só pinta o que o dinheiro cobre por inteiro;
-     quando não dá para pagar uma parcela cheia, para de pintar dali em diante. */
+  /* Pinta célula por célula, do mês mais próximo para o mais distante. Dentro de
+     cada mês, paga as parcelas em ordem (de cima para baixo) enquanto couberem;
+     quando a parcela da vez não cabe, não para: procura no MESMO mês outras
+     parcelas que ainda caibam na sobra e pinta essas (aproveitando o dinheiro).
+     Só quando o mês não fecha por inteiro é que para e guarda a sobra, sem avançar
+     para os meses seguintes — a cobertura continua sendo sequencial por mês. */
   document.querySelectorAll("[data-cel]").forEach(el=>el.classList.remove("coberto","parcial"));
   let acumulado=0, cobertos=0, restaCob=guardadoBRL, acabou=false;
   mesesPl.forEach(m=>{
@@ -2410,15 +2895,27 @@ function refresh(){
     put("plm:"+m, tm?fmt(tm):"—");
     put("pla:"+m, acumulado?fmt(acumulado):"—");
     if(acabou) return;
-    for(const l of linhasPl){
-      const v=valPlano(t,m,l.k);
-      if(v<=0.005) continue;
-      if(restaCob>=v-0.005){
-        restaCob-=v; cobertos+=v;
-        const cel=document.querySelector(`[data-cel="${m}.${l.k}"]`);
-        if(cel) cel.classList.add("coberto");
-      }else{ acabou=true; break; }
+    const itens=linhasPl.map(l=>({k:l.k,v:valPlano(t,m,l.k)})).filter(x=>x.v>0.005);
+    const pagas=new Set();
+    for(const it of itens){
+      if(restaCob>=it.v-0.005){ restaCob-=it.v; cobertos+=it.v; pagas.add(it.k); }
+      else break;
     }
+    let encaixou=true;
+    while(encaixou){
+      encaixou=false;
+      let melhor=null;
+      for(const it of itens){
+        if(pagas.has(it.k)) continue;
+        if(it.v<=restaCob+0.005 && (!melhor || it.v>melhor.v)) melhor=it;
+      }
+      if(melhor){ restaCob-=melhor.v; cobertos+=melhor.v; pagas.add(melhor.k); encaixou=true; }
+    }
+    pagas.forEach(k=>{
+      const cel=document.querySelector(`[data-cel="${m}.${k}"]`);
+      if(cel) cel.classList.add("coberto");
+    });
+    if(pagas.size<itens.length) acabou=true;
   });
   put("plSobra", restaCob>0.005 ? brl(restaCob) : "—");
   const fx1=mesesPl.reduce((a,m)=>a+valPlano(t,m,"compraFX"),0);
@@ -2594,6 +3091,45 @@ document.addEventListener("click",e=>{
   if(t.dataset.ano){ state.ano=+t.dataset.ano; state.view="ano"; state.tripId=null; saveUi(); render(); return; }
   if(t.dataset.addyear){ state.modal="ano"; renderModal(); return; }
   if(t.dataset.open){ state.tripId=t.dataset.open; state.view="viagem"; state.abertos={}; saveUi(); render(); window.scrollTo(0,0); return; }
+  if(t.dataset.caltoggle){
+    state.abertos=state.abertos||{};
+    const ab=!state.abertos.calendario; state.abertos.calendario=ab;
+    saveUi&&saveUi();
+    const sec=t.closest(".calsec"); if(sec){ sec.classList.toggle("aberto",ab); t.setAttribute("aria-expanded",String(ab)); }
+    return;
+  }
+  if(t.dataset.addmk){
+    const tr=trip(); if(!tr) return;
+    tr.marcos=Array.isArray(tr.marcos)?tr.marcos:[];
+    tr.marcos.push(t.dataset.addmk==="viagem"
+      ? {id:uid(),tipo:"viagem",data:"",de:"",para:""}
+      : {id:uid(),tipo:"estadia",data:"",ate:"",local:""});
+    state.abertos=state.abertos||{}; state.abertos.calendario=true;
+    touch(tr.id); render();
+    const rows=document.querySelectorAll('[data-lista="marcos"] .lrow input, [data-lista="marcos"] .lrow select');
+    if(rows.length) rows[rows.length-1].focus();
+    return;
+  }
+  if(t.dataset.delmk){
+    const tr=trip(); if(!tr) return;
+    tr.marcos=(tr.marcos||[]).filter(r=>r.id!==t.dataset.delmk);
+    touch(tr.id); render(); return;
+  }
+  if(t.dataset.addcal){
+    const tr=trip(); if(!tr) return;
+    tr.agenda=Array.isArray(tr.agenda)?tr.agenda:[];
+    tr.agenda.push({id:uid(),data:"",cidade:"",atividade:"",nota:""});
+    state.abertos=state.abertos||{}; state.abertos.calendario=true;
+    touch(tr.id); render();
+    const rows=document.querySelectorAll('[data-lista="agenda"] .lrow input');
+    if(rows.length) rows[rows.length-1].focus();
+    return;
+  }
+  if(t.dataset.delcal){
+    const tr=trip(); if(!tr) return;
+    tr.agenda=(tr.agenda||[]).filter(r=>r.id!==t.dataset.delcal);
+    touch(tr.id); render(); return;
+  }
   if(t.dataset.cattoggle){
     const k=t.dataset.cattoggle, aberto=!state.abertos[k];
     state.abertos[k]=aberto;
@@ -2733,6 +3269,11 @@ document.addEventListener("click",e=>{
   }
   if(act==="parcelar"){ state.modal="parcelar"; renderModal(); return; }
   if(act==="lancarparcelas"){ lancarParcelas(); return; }
+  if(act==="imprimircal"){ imprimirCalendario(); return; }
+  if(act==="baixarcal"){ baixarCalendario(); return; }
+  if(act==="gerarcal"){ const tr=trip(); if(tr) gerarAgendaDeMarcos(tr,false); return; }
+  if(act==="editarcal"){ const tr=trip(); if(tr){ tr.calView="edit"; state.abertos=state.abertos||{}; state.abertos.calendario=true; touch(tr.id); render(); } return; }
+  if(act==="concluircal"){ const tr=trip(); if(tr){ tr.calView="grade"; state.abertos=state.abertos||{}; state.abertos.calendario=true; touch(tr.id); render(); } return; }
   if(act==="distribuirplano"){ state.abertos.plano=true; distribuirPlano(); return; }
   if(act==="limparplano"){ limparPlano(); return; }
   if(act==="maismes"){
@@ -2975,6 +3516,21 @@ document.addEventListener("input",e=>{
     },450);
     return;
   }
+  if(el.dataset.mk){
+    const [id,campo]=el.dataset.mk.split("."), tr=trip(); if(!tr) return;
+    const m=(tr.marcos||[]).find(x=>x.id===id); if(!m) return;
+    m[campo]=el.value;
+    if(campo==="tipo"){ render(); return; }
+    if(!tr._sync){ tr._sync=true; sincMarcoParaCampos(tr,m); tr._sync=false; }
+    touch(tr.id); return;
+  }
+  if(el.dataset.cal){
+    const [id,campo]=el.dataset.cal.split("."), tr=trip(); if(!tr) return;
+    const d=(tr.agenda||[]).find(x=>x.id===id); if(!d) return;
+    d[campo]=el.value;
+    if(!tr._sync && (campo==="cidade"||campo==="data")){ tr._sync=true; sincDiaParaCampos(tr,d); tr._sync=false; }
+    touch(tr.id); return;
+  }
   if(el.dataset.p){
     const [k,id,campo]=el.dataset.p.split("."), tr=trip(); if(!tr) return;
     const r=(tr[k]||[]).find(x=>x.id===id); if(!r) return;
@@ -3076,6 +3632,16 @@ document.addEventListener("focusout",e=>{
 
 document.addEventListener("change",e=>{
   const el=e.target;
+  /* sincroniza campos → calendário ao terminar de editar (sair do campo), não a cada
+     tecla — isso recriava a tela e jogava o scroll para o topo. */
+  if(el.dataset && el.dataset.p){
+    const [k]=el.dataset.p.split("."), tr=trip();
+    if(tr && !tr._sync && (tr.agenda&&tr.agenda.length) && (k==="passagens"||k==="hospedagem"||k==="atracoes")){
+      tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false;
+      touch(tr.id); render();
+      return;
+    }
+  }
   if(el.id==="hotquartos"||el.id==="hotcafe"){
     const tr=trip(); if(!tr) return;
     if(el.id==="hotquartos") tr.quartos=Math.max(1,num(el.value)||1);

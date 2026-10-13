@@ -379,6 +379,8 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .meter{height:5px;border-radius:3px;background:var(--rule-2);overflow:hidden;margin:14px 0 10px}
 .meter>i{display:block;height:100%;background:var(--green);border-radius:3px;transition:width .25s ease}
 .meter.estourou>i{background:var(--rose)}
+.meter.usando>i{background:var(--gold)}
+.atencao,.hint.atencao{color:var(--gold)}
 .kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:13.5px;border-top:1px solid var(--rule-2)}
 .kv:first-of-type{border-top:0}
 .kv span{color:var(--ink-2)}
@@ -442,7 +444,6 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .plano tfoot td{padding:6px 6px;font-size:12.5px}
 .plano tfoot .ftot th,.plano tfoot .ftot td{font-weight:600;border-top:1.5px solid var(--ink);border-bottom:0}
 .plano tfoot .facum td,.plano tfoot .facum th{color:var(--ink-3);font-size:12px;border-bottom:1px solid var(--rule)}
-.plano tfoot .fmoeda th,.plano tfoot .fmoeda td{background:color-mix(in srgb,var(--gold) 7%,transparent)}
 /* azul = a parcela já está paga pelo dinheiro de hoje. Pinta a célula, não a coluna. */
 .plano td.coberto{background:color-mix(in srgb,var(--blue) 15%,transparent)}
 .plano td.coberto input{color:var(--blue);font-weight:600}
@@ -895,9 +896,24 @@ function compute(t){
   out.reserva = (t.reservaCur==="FX") ? num(t.reserva)*rate : num(t.reserva);
   out.total   = out.sub + out.reserva;
   out.meta    = (t.metaCur==="BRL") ? num(t.meta) : num(t.meta)*rate;   // teto opcional
-  /* tolerância de um centavo: arredondamento de conversão não é estouro de teto */
-  const acima = out.total-out.meta;
+  /* O teto vale para a viagem inteira e a reserva mora DENTRO dele: só há estouro
+     quando os próprios lançamentos passam do teto, não quando a soma com a reserva
+     passa. Tolerância de um centavo, porque arredondamento de câmbio não é estouro. */
+  const acima = out.sub-out.meta;
   out.excedente = (out.meta>0 && acima>0.011) ? acima : 0;
+  /* O teto cobre a viagem inteira, reserva incluída. Logo, o que os lançamentos
+     podem custar sem encostar na reserva é teto menos reserva. Daí os três
+     estados: ainda com folga, já comendo a reserva, ou reserva acabada e
+     teto estourado. */
+  out.semReserva   = Math.max(0, out.meta - out.reserva);
+  const comeu      = out.sub - out.semReserva;
+  out.reservaUsada = (out.meta>0 && comeu>0.011) ? Math.min(out.reserva, comeu) : 0;
+  out.reservaSobra = Math.max(0, out.reserva - out.reservaUsada);
+  out.folga        = (out.meta>0) ? Math.max(0, out.semReserva - out.sub) : 0;
+  out.estado = out.meta<=0 ? "sem-teto"
+             : out.excedente>0 ? "estourou"
+             : out.reservaUsada>0 ? "usando"
+             : "folgado";
   out.totalFx=out.total/rate;
   out.pax=totalPax(t)||1;
   out.dias=diasViagem(t)||1;
@@ -2118,11 +2134,6 @@ function painelPlano(t){
       <tr class="facum"><th class="colcat">Acumulado</th>
         ${meses.map(m=>`<td class="num" data-calc="pla:${m}"></td>`).join("")}
         <td class="colfim"></td><td class="colfim"></td></tr>
-      <tr class="fmoeda"><th class="colcat"><i class="dot" style="background:var(--gold)"></i>Comprar ${esc(sym)} <small>em ${esc(sym)}</small></th>
-        ${meses.map(m=>`<td><input type="text" inputmode="decimal"
-           data-pl="${m}.compraFX" data-n="2" value="${valPlano(t,m,"compraFX")?fmt(valPlano(t,m,"compraFX")):""}"
-           placeholder="—"></td>`).join("")}
-        <td class="colfim num" data-calc="plFX"></td><td class="colfim num" data-calc="plFXbrl"></td></tr>
     </tfoot></table></div>
 
     <div class="mapacts">
@@ -2137,8 +2148,7 @@ function painelPlano(t){
       <div class="kv"><span>Ainda sem cobertura</span><b data-calc="plDesc"></b></div>
       <div class="kv"><span>Sobra, sem dar uma parcela inteira</span><b data-calc="plSobra"></b></div>
       <p class="hint" style="margin-top:8px">
-        <span class="chip coberto"></span> parcelas que o dinheiro de hoje já paga, contadas do mês mais próximo e de cima para baixo dentro de cada mês ·
-        a linha de compra de ${esc(sym)} não entra no total, ela é a forma de pagar.</p>
+        <span class="chip coberto"></span> parcelas que o dinheiro de hoje já paga, contadas do mês mais próximo e de cima para baixo dentro de cada mês</p>
     </div>
   </section>`;
   return h;
@@ -2796,15 +2806,21 @@ function refresh(){
   const mb=document.getElementById("metabox");
   if(mb){
     if(c.meta>0){
-      const pct=Math.min(100, c.total/c.meta*100);
+      const pct=Math.min(100, c.sub/c.meta*100);
+      const faixa = c.estado==="estourou" ? " estourou" : c.estado==="usando" ? " usando" : "";
+      const recado =
+        c.estado==="estourou"
+          ? `<p class="hint neg" style="margin-top:8px">A reserva acabou e a viagem passou do teto em <b>${brl(c.excedente)}</b>.</p>`
+        : c.estado==="usando"
+          ? `<p class="hint atencao" style="margin-top:8px">Já usando <b>${brl(c.reservaUsada)}</b> da reserva. Sobram <b>${brl(c.reservaSobra)}</b> dela.</p>`
+          : `<p class="hint" style="margin-top:8px">Sem tocar na reserva — ainda cabem <b>${brl(c.folga)}</b>.</p>`;
       mb.innerHTML=`
-        <div class="meter${c.excedente>0?" estourou":""}"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="meter${faixa}"><i style="width:${pct.toFixed(1)}%"></i></div>
         <div class="kv"><span>Lançamentos</span><b>${brl(c.sub)}</b></div>
+        <div class="kv"><span>Cabem sem usar a reserva</span><b>${brl(c.semReserva)}</b></div>
         <div class="kv"><span>Reserva</span><b>${brl(c.reserva)}</b></div>
         <div class="kv"><span>Teto de orçamento</span><b>${brl(c.meta)}</b></div>
-        ${c.excedente>0
-          ? `<p class="hint neg" style="margin-top:8px">Passou do teto em <b>${brl(c.excedente)}</b>.</p>`
-          : `<p class="hint" style="margin-top:8px">Ainda cabem ${brl(c.meta-c.total)} dentro do teto.</p>`}`;
+        ${recado}`;
     }else{
       mb.innerHTML = c.reserva>0
         ? `<div class="kv" style="margin-top:12px"><span>Lançamentos</span><b>${brl(c.sub)}</b></div>
@@ -2820,12 +2836,17 @@ function refresh(){
   const rt=document.querySelector('[data-calc="restxt"]');
   if(rt){
     if(c.meta>0){
-      rt.className=c.excedente>0?"neg":"";
-      rt.innerHTML=c.excedente>0
-        ? `Lançamentos <b>${brl(c.sub)}</b> + reserva <b>${brl(c.reserva)}</b> = <b>${brl(c.total)}</b>, `+
-          `<b>${brl(c.excedente)}</b> acima do teto de ${brl(c.meta)}.`
-        : `Lançamentos <b>${brl(c.sub)}</b> + reserva <b>${brl(c.reserva)}</b> = <b>${brl(c.total)}</b>, `+
-          `dentro do teto de ${brl(c.meta)} — ainda cabem <b>${brl(c.meta-c.total)}</b>.`;
+      rt.className = c.estado==="estourou" ? "neg" : c.estado==="usando" ? "atencao" : "";
+      rt.innerHTML =
+        c.estado==="estourou"
+          ? `Lançamentos <b>${brl(c.sub)}</b> contra um teto de ${brl(c.meta)}. `+
+            `A reserva de ${brl(c.reserva)} foi toda consumida e a viagem ainda passa do teto em <b>${brl(c.excedente)}</b>.`
+        : c.estado==="usando"
+          ? `Lançamentos <b>${brl(c.sub)}</b>. Sem a reserva o teto comporta ${brl(c.semReserva)}, `+
+            `então você já está usando <b>${brl(c.reservaUsada)}</b> da reserva de ${brl(c.reserva)} — `+
+            `ainda sobram <b>${brl(c.reservaSobra)}</b> dela antes de estourar os ${brl(c.meta)}.`
+          : `Lançamentos <b>${brl(c.sub)}</b>. Cabem <b>${brl(c.folga)}</b> antes de encostar na reserva `+
+            `de ${brl(c.reserva)}, que é o que separa você do teto de ${brl(c.meta)}.`;
     }else{
       rt.className="";
       rt.innerHTML=`Lançamentos <b>${brl(c.sub)}</b> + reserva <b>${brl(c.reserva)}</b> = <b>${brl(c.total)}</b>.`;
@@ -2918,9 +2939,6 @@ function refresh(){
     if(pagas.size<itens.length) acabou=true;
   });
   put("plSobra", restaCob>0.005 ? brl(restaCob) : "—");
-  const fx1=mesesPl.reduce((a,m)=>a+valPlano(t,m,"compraFX"),0);
-  put("plFX", fmt(fx1));
-  put("plFXbrl", fmt(fx1*taxa));
   put("plDisp", brl(guardadoBRL));
   put("plCob", brl(cobertos));
   put("plDesc", brl(Math.max(0,planejado-cobertos)));

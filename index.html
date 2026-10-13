@@ -1984,6 +1984,40 @@ function totalMesPlano(t,mes){
 function metaDaLinha(t,k,c){
   return k==="reserva" ? c.reserva : c.cats[k];
 }
+/* Fecha as parcelas sozinho. A diferença entre o custo da categoria e a soma das
+   parcelas dela vai para a ÚLTIMA parcela lançada — assim o câmbio pode mexer nos
+   valores à vontade que o plano continua batendo, sem ninguém ter de refazer conta.
+   Se a diferença for negativa e maior que a última parcela, o que sobra desce para
+   a parcela anterior, e assim por diante. Categoria sem nenhuma parcela fica como
+   está: inventar uma primeira parcela seria decidir no lugar da pessoa.
+   Devolve true quando mexeu em alguma coisa, para quem chamou salvar. */
+function fecharParcelas(t,c){
+  const meses=mesesDoPlano(t);
+  if(!meses.length) return false;
+  const focado=document.activeElement;
+  const emEdicao=(focado&&focado.dataset&&focado.dataset.pl)?focado.dataset.pl:"";
+  let mexeu=false;
+  linhasDoPlano(t).forEach(l=>{
+    if(!meses.some(m=>valPlano(t,m,l.k)>0.005)) return;
+    const soma=meses.reduce((a,m)=>a+valPlano(t,m,l.k),0);
+    let resto=Math.round((metaDaLinha(t,l.k,c)-soma)*100)/100;
+    if(Math.abs(resto)<0.005) return;
+    for(let i=meses.length-1;i>=0&&Math.abs(resto)>0.005;i--){
+      const m=meses[i], v=valPlano(t,m,l.k);
+      if(v<=0.005) continue;
+      if(emEdicao===m+"."+l.k) return;        /* não disputa a célula que está sendo digitada */
+      const novo=Math.max(0, Math.round((v+resto)*100)/100);
+      resto=Math.round((resto-(novo-v))*100)/100;
+      if(Math.abs(novo-v)<0.005) continue;
+      t.plano=t.plano||{}; t.plano[m]=t.plano[m]||{};
+      t.plano[m][l.k]=novo;
+      const inp=document.querySelector(`[data-pl="${m}.${l.k}"]`);
+      if(inp) inp.value = novo>0.005 ? fmt(novo) : "";
+      mexeu=true;
+    }
+  });
+  return mexeu;
+}
 /* Distribui o que falta de cada categoria em parcelas iguais até o mês da partida. */
 function distribuirPlano(){
   const t=trip(); if(!t) return;
@@ -2867,6 +2901,7 @@ function refresh(){
   if(barra) barra.style.width=Math.min(100, c.total>0?guardadoBRL/c.total*100:0).toFixed(1)+"%";
 
   /* ---- plano de pagamento ---- */
+  if(fecharParcelas(t,c)) touch(t.id);
   const mesesPl=mesesDoPlano(t), linhasPl=linhasDoPlano(t);
   let planejado=0;
   const foraDoLugar=[], semPlano=[];
@@ -2885,10 +2920,11 @@ function refresh(){
   const av=document.querySelector('[data-calc="plAviso"]');
   if(av){
     if(foraDoLugar.length){
-      av.className="aviso ruim";
-      av.innerHTML = "As parcelas não fecham: "+foraDoLugar.map(f=>
+      av.className="aviso neutro";
+      av.innerHTML = "Fechando sozinho: "+foraDoLugar.map(f=>
         f.falta>0 ? `<b>${esc(f.nome)}</b> faltam ${brl(f.falta)}`
-                  : `<b>${esc(f.nome)}</b> ${brl(-f.falta)} a mais`).join(" · ")+".";
+                  : `<b>${esc(f.nome)}</b> ${brl(-f.falta)} a mais`).join(" · ")+
+        ". Entra na última parcela assim que você sair do campo.";
     }else if(semPlano.length && planejado>0.005){
       av.className="aviso neutro";
       av.innerHTML = "O que já foi lançado fecha certo. Ainda sem parcelas: <b>"+
@@ -2898,7 +2934,8 @@ function refresh(){
       av.innerHTML = "Nada parcelado ainda. Use <b>Parcelar categoria</b> ou <b>Distribuir tudo até a partida</b>.";
     }else{
       av.className="aviso bom";
-      av.innerHTML = "Todas as categorias fecham com o custo da viagem.";
+      av.innerHTML = "Todas as categorias fecham com o custo da viagem. "+
+        "Diferença de câmbio entra sozinha na última parcela de cada uma.";
     }
   }
   put("plTotal", fmt(planejado));
@@ -5106,6 +5143,12 @@ async function importarExcel(f){
     state.importado=melhor; state.modal="importar"; renderModal();
   }catch(e){ console.error(e); toast("Não consegui ler a planilha"); }
 }
+
+/* Ao sair de uma célula do plano, refaz a conta: durante a digitação o ajuste
+   automático fica parado para não brigar com quem está escrevendo. */
+document.addEventListener("focusout",e=>{
+  if(e.target&&e.target.dataset&&e.target.dataset.pl) setTimeout(refresh,0);
+});
 
 /* ============================ boot ============================ */
 function saveUi(){ try{ localStorage.setItem(LSY,JSON.stringify({ano:state.ano,tripId:state.tripId,view:state.view})); }catch(e){} }

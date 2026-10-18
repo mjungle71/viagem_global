@@ -1422,24 +1422,17 @@ function ajustarMeiosPorCambio(t,c){
   const taxa=num(t.cambio)||1, ms=meiosDe(t);
   const foco=document.activeElement;
   const editando=(foco&&foco.dataset&&foco.dataset.meio)?String(foco.dataset.meio):"";
+  /* As referências da primeira versão foram criadas sem a regra de entrada abaixo,
+     então ficaram carregando o resíduo de câmbio antigo. Descartamos uma vez para
+     que sejam refeitas já com a regra valendo. */
+  if(num(t.meioRefV)<2){ delete t.meioRef; t.meioRefV=2; }
   t.meioRef=t.meioRef||{};
   let mexeu=false;
-  linhasDoMeio(t).forEach(l=>{
-    const soma=porCategoria(t,l.k);
-    if(soma<=0.005) return;                      /* linha vazia não tem o que corrigir */
-    const agora=partesDaLinha(t,l.k,c);
-    const ref=t.meioRef[l.k];
-    if(!ref){ t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return; }
-    const mesmosLancamentos = Math.abs(ref.b-agora.brl)<0.005 && Math.abs(ref.f-agora.fx)<0.005;
-    if(!mesmosLancamentos){                      /* mudou o plano, não o câmbio */
-      t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return;
-    }
-    const antes=ref.b+ref.f*num(ref.x||taxa);
-    const depois=agora.brl+agora.fx*taxa;
-    if(antes<=0.005 || Math.abs(depois-antes)<0.005) return;   /* a cotação não mexeu nesta linha */
-    const fator=depois/antes;
+  const reescalar=(k,fator)=>{
+    if(!(fator>0) || Math.abs(fator-1)<1e-9) return false;
+    let tocou=false;
     ms.forEach(m=>{
-      const chave=l.k+":"+m.id;
+      const chave=k+":"+m.id;
       if(chave===editando) return;               /* não briga com a célula em digitação */
       const v=num(t.planoMeio[chave]); if(v<=0.005) return;
       const novo=Math.round(v*fator*100)/100;
@@ -1450,8 +1443,34 @@ function ajustarMeiosPorCambio(t,c){
         const tx=taxaDeExibicao(t,moedaMostrada(t))||1;
         inp.value=fmt(novo/tx);
       }
-      mexeu=true;
+      tocou=true;
     });
+    return tocou;
+  };
+  linhasDoMeio(t).forEach(l=>{
+    const soma=porCategoria(t,l.k);
+    if(soma<=0.005) return;                      /* linha vazia não tem o que corrigir */
+    const agora=partesDaLinha(t,l.k,c);
+    const ref=t.meioRef[l.k];
+    if(!ref){
+      /* Primeira passagem nesta linha: a referência nasce sem mexer em nada, com uma
+         exceção. Linha lançada INTEIRAMENTE em moeda estrangeira e com diferença de
+         menos de 2% do custo é resíduo de câmbio acumulado antes de existir referência,
+         não escolha de ninguém — não se distribui 98,7% de uma categoria de propósito.
+         Essa, e só essa, é fechada na entrada. */
+      const custo=agora.brl+agora.fx*taxa, dif=custo-soma;
+      if(agora.brl<0.005 && agora.fx>0.005 && custo>0.005 &&
+         Math.abs(dif)>0.005 && Math.abs(dif)<custo*0.02 && reescalar(l.k, custo/soma)) mexeu=true;
+      t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return;
+    }
+    const mesmosLancamentos = Math.abs(ref.b-agora.brl)<0.005 && Math.abs(ref.f-agora.fx)<0.005;
+    if(!mesmosLancamentos){                      /* mudou o plano, não o câmbio */
+      t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return;
+    }
+    const antes=ref.b+ref.f*num(ref.x||taxa);
+    const depois=agora.brl+agora.fx*taxa;
+    if(antes<=0.005 || Math.abs(depois-antes)<0.005) return;   /* a cotação não mexeu nesta linha */
+    if(reescalar(l.k, depois/antes)) mexeu=true;
     t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa};
   });
   return mexeu;

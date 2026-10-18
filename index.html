@@ -880,16 +880,21 @@ function pintarPeriodo(sel,obj,campos,editado){
 
 /* ============================ cálculo ============================ */
 function compute(t){
-  const rate=num(t.cambio)||1, out={cats:{},rows:{},sub:0};
+  const rate=num(t.cambio)||1, out={cats:{},catsBRL:{},catsFX:{},rows:{},sub:0};
   for(const c of CATS){
-    const rows=t[c.key]||[]; let soma=0; out.rows[c.key]=[];
+    const rows=t[c.key]||[]; let soma=0, emBRL=0, emFX=0; out.rows[c.key]=[];
     for(const r of rows){
       const v=c.calc(r,t);
       const b=(r.cur==="FX")? v*rate : v;
+      if(r.cur==="FX") emFX+=v; else emBRL+=v;
       out.rows[c.key].push({brl:b, fxv:b/rate, raw:v});
       soma+=b;
     }
-    out.cats[c.key]=soma; out.sub+=soma;
+    /* guardamos a parte lançada em moeda estrangeira separada da parte em reais:
+       é o que depois permite saber se uma diferença veio do câmbio ou de alguém
+       ter mexido nos lançamentos. */
+    out.cats[c.key]=soma; out.catsBRL[c.key]=emBRL; out.catsFX[c.key]=emFX;
+    out.sub+=soma;
   }
   /* A reserva é uma folga que VOCÊ define: não é o resto de um teto. Assim, mexer
      em pessoas, datas ou lançamentos altera o total, e não a reserva. */
@@ -1395,6 +1400,62 @@ function valMeio(t,cat,mid){ return num((t.planoMeio||{})[cat+":"+mid]); }
 function porMeio(t,mid){ return linhasDoMeio(t).reduce((a,l)=>a+valMeio(t,l.k,mid),0); }
 function porCategoria(t,cat){ return meiosDe(t).reduce((a,m)=>a+valMeio(t,cat,m.id),0); }
 function custoDaLinha(t,k,c){ return k==="reserva" ? num(c.reserva) : num(c.cats[k]); }
+/* A parte da categoria lançada em reais e a parte lançada na moeda da viagem. */
+function partesDaLinha(t,k,c){
+  if(k==="reserva")
+    return t.reservaCur==="FX" ? {brl:0, fx:num(t.reserva)} : {brl:num(t.reserva), fx:0};
+  return {brl:num(c.catsBRL[k]), fx:num(c.catsFX[k])};
+}
+
+/* Diferença de câmbio não é decisão de ninguém, então não deve virar saldo.
+   Para cada categoria guardamos, no momento em que você mexe nela, de quanto era
+   o custo: quanto em reais, quanto em moeda estrangeira e a que cotação. Depois:
+   - se os lançamentos continuam os mesmos e só a cotação mudou, as células são
+     corrigidas na mesma proporção, de modo que a linha volte a fechar como fechava
+     (e uma folga que você tenha deixado de propósito continua com o mesmo tamanho);
+   - se alguém mexeu nos lançamentos, nada é corrigido — a diferença aparece na
+     coluna "Falta definir", que é justamente para isso.
+   Linha sem referência ganha uma na primeira passagem, sem alterar valor nenhum:
+   o que está lá hoje passa a ser o ponto de partida. */
+function ajustarMeiosPorCambio(t,c){
+  if(!t.planoMeio) return false;
+  const taxa=num(t.cambio)||1, ms=meiosDe(t);
+  const foco=document.activeElement;
+  const editando=(foco&&foco.dataset&&foco.dataset.meio)?String(foco.dataset.meio):"";
+  t.meioRef=t.meioRef||{};
+  let mexeu=false;
+  linhasDoMeio(t).forEach(l=>{
+    const soma=porCategoria(t,l.k);
+    if(soma<=0.005) return;                      /* linha vazia não tem o que corrigir */
+    const agora=partesDaLinha(t,l.k,c);
+    const ref=t.meioRef[l.k];
+    if(!ref){ t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return; }
+    const mesmosLancamentos = Math.abs(ref.b-agora.brl)<0.005 && Math.abs(ref.f-agora.fx)<0.005;
+    if(!mesmosLancamentos){                      /* mudou o plano, não o câmbio */
+      t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa}; mexeu=true; return;
+    }
+    const antes=ref.b+ref.f*num(ref.x||taxa);
+    const depois=agora.brl+agora.fx*taxa;
+    if(antes<=0.005 || Math.abs(depois-antes)<0.005) return;   /* a cotação não mexeu nesta linha */
+    const fator=depois/antes;
+    ms.forEach(m=>{
+      const chave=l.k+":"+m.id;
+      if(chave===editando) return;               /* não briga com a célula em digitação */
+      const v=num(t.planoMeio[chave]); if(v<=0.005) return;
+      const novo=Math.round(v*fator*100)/100;
+      if(Math.abs(novo-v)<0.005) return;
+      t.planoMeio[chave]=novo;
+      const inp=document.querySelector('[data-meio="'+chave+'"]');
+      if(inp && inp!==foco){
+        const tx=taxaDeExibicao(t,moedaMostrada(t))||1;
+        inp.value=fmt(novo/tx);
+      }
+      mexeu=true;
+    });
+    t.meioRef[l.k]={b:agora.brl, f:agora.fx, x:taxa};
+  });
+  return mexeu;
+}
 
 /* Atualiza só os números da matriz. Redesenhar a seção inteira a cada tecla
    tiraria o cursor do campo no meio do número. */
@@ -1402,6 +1463,7 @@ function pintarMeios(){
   const t=trip(); if(!t) return;
   const tab=document.querySelector(".meiostab"); if(!tab) return;
   const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
+  if(ajustarMeiosPorCambio(t,c)) touch(t.id);
   const tx=taxaDeExibicao(t,alvo)||1, mostra=v=>sim+" "+fmt(v/tx);
   const cls=v=>Math.abs(v)<0.005?"ok":(v<0?"neg":"");
   const põe=(sel,i,txt,klass)=>{
@@ -1447,6 +1509,7 @@ function fontesSemMeio(t){
 
 function painelMeios(t){
   const c=compute(t), ms=meiosDe(t), alvo=moedaMostrada(t), sim=simboloDe(alvo);
+  if(ajustarMeiosPorCambio(t,c)) touch(t.id);
   const tx=taxaDeExibicao(t,alvo)||1;
   const mostra=v=>fmt(v/tx);                       /* reais → moeda escolhida */
   const grid=`minmax(104px,1fr) repeat(${ms.length},minmax(92px,1fr)) minmax(96px,auto)`;
@@ -3518,6 +3581,10 @@ document.addEventListener("input",e=>{
     tr.planoMeio=tr.planoMeio||{};
     const v=num(el.value)*tx;                 /* volta para reais */
     if(v) tr.planoMeio[cat+":"+mid]=v; else delete tr.planoMeio[cat+":"+mid];
+    /* o que você acabou de digitar passa a ser o ponto de partida desta categoria */
+    const cc=compute(tr), pp=partesDaLinha(tr,cat,cc);
+    tr.meioRef=tr.meioRef||{};
+    tr.meioRef[cat]={b:pp.brl, f:pp.fx, x:num(tr.cambio)||1};
     touch(tr.id); pintarMeios(); return;
   }
   if(el.dataset.meionome){

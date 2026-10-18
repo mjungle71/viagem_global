@@ -1517,13 +1517,40 @@ function pintarMeios(){
 function chaveNome(s){
   return String(s||"").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
 }
+/* A fonte pode vir detalhada — "Espécie - tati", "Wise / viagem", "Cartão: Nubank".
+   O que casa com a coluna é a RAIZ: o que vem antes do separador. Travessão e barra
+   exigem espaço ANTES, senão "Cartão pré-pago" viraria "Cartão pré"; dois-pontos e
+   vírgula, que se escrevem colados, exigem espaço depois. */
+function raizFonte(s){
+  return chaveNome(String(s||"").split(/\s+[-–—\/·]\s*|\s*[:,]\s+/)[0]);
+}
+/* Qual coluna recebe o dinheiro desta fonte. Na ordem: nome inteiro igual ao da
+   coluna, depois a raiz igual, e por fim a coluna cujo nome começa a fonte — é o
+   que faz "Cartão pré-pago" cair na coluna "Cartão". Entre duas que sirvam, ganha
+   a mais específica. Nenhuma servindo, a fonte fica de fora e o app avisa. */
+function meioDaFonte(t,fonte){
+  const cheio=chaveNome(fonte); if(!cheio) return null;
+  const raiz=raizFonte(fonte), ms=meiosDe(t);
+  const exata = ms.find(m=>chaveNome(m.nome)===cheio) || ms.find(m=>chaveNome(m.nome)===raiz);
+  if(exata) return exata;
+  let melhor=null;
+  ms.forEach(m=>{
+    const n=chaveNome(m.nome); if(!n) return;
+    if(cheio.indexOf(n+" ")===0 || raiz.indexOf(n+" ")===0){
+      if(!melhor || n.length>chaveNome(melhor.nome).length) melhor=m;
+    }
+  });
+  return melhor;
+}
 function tenhoNoMeio(t,nome){
   const alvo=chaveNome(nome); if(!alvo) return 0;
-  return (t.guardados||[]).reduce((a,g)=>chaveNome(g.fonte)===alvo?a+valorEmBRL(t,g):a,0);
+  return (t.guardados||[]).reduce((a,g)=>{
+    const m=meioDaFonte(t,g.fonte);
+    return (m && chaveNome(m.nome)===alvo) ? a+valorEmBRL(t,g) : a;
+  },0);
 }
 function fontesSemMeio(t){
-  const nomes=meiosDe(t).map(m=>chaveNome(m.nome)).filter(Boolean);
-  return (t.guardados||[]).filter(g=>valorEmBRL(t,g)>0 && nomes.indexOf(chaveNome(g.fonte))<0);
+  return (t.guardados||[]).filter(g=>valorEmBRL(t,g)>0 && !meioDaFonte(t,g.fonte));
 }
 
 function painelMeios(t){
@@ -1592,7 +1619,8 @@ function painelMeios(t){
     const nomes=[...new Set(soltas.map(g=>g.fonte||"sem nome"))];
     h+=`<p class="aviso neutro">${soltas.length===1?"A fonte":"As fontes"}
       <b>${nomes.map(esc).join(", ")}</b> não ${soltas.length===1?"aparece":"aparecem"} acima:
-      nenhuma coluna tem esse nome. Renomeie a coluna ou a fonte para que casem.</p>`;
+      nenhuma coluna tem esse nome. Vale o que vem antes do travessão, então
+      <b>Espécie - tati</b> entra na coluna <b>Espécie</b>. Renomeie a coluna ou a fonte.</p>`;
   }
 
   /* o que a distribuição diz sobre o orçamento */
@@ -1636,7 +1664,7 @@ function painelPoupanca(t){
     const semTaxa = g.moeda!=="BRL" && !(num(g.taxa)||taxaPadrao(t,g.moeda));
     h+=`<div class="lrow" style="grid-template-columns:var(--g)" data-rid="${g.id}">
       <div class="cell wide" data-l="Onde está"><input type="text" list="fontesdin" data-g="${g.id}.fonte"
-        value="${esc(g.fonte||"")}" placeholder="Wise"></div>
+        value="${esc(g.fonte||"")}" placeholder="Wise - tati"></div>
       <div class="cell" data-l="Moeda"><select data-g="${g.id}.moeda">${moedaOpts(g.moeda||"BRL")}</select></div>
       <div class="cell" data-l="Valor"><input type="text" inputmode="decimal" class="ta-r" data-g="${g.id}.valor"
         data-n="2" value="${fmt(num(g.valor))}"></div>
@@ -1650,8 +1678,9 @@ function painelPoupanca(t){
   });
   h+=`</div>
     <datalist id="fontesdin">
-      <option value="Espécie"><option value="Wise"><option value="Conta corrente">
-      <option value="Cartão pré-pago"><option value="Poupança"><option value="Investimentos">
+      <option value="Espécie"><option value="Wise"><option value="Cartão">
+      <option value="Conta corrente"><option value="Cartão pré-pago">
+      <option value="Poupança"><option value="Investimentos">
     </datalist>
     <button class="addrow" data-addg="1">+ adicionar fonte</button>
     <div class="mapacts">

@@ -1517,28 +1517,23 @@ function pintarMeios(){
 function chaveNome(s){
   return String(s||"").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"");
 }
-/* A fonte pode vir detalhada — "Espécie - tati", "Wise / viagem", "Cartão: Nubank".
-   O que casa com a coluna é a RAIZ: o que vem antes do separador. Travessão e barra
-   exigem espaço ANTES, senão "Cartão pré-pago" viraria "Cartão pré"; dois-pontos e
-   vírgula, que se escrevem colados, exigem espaço depois. */
-function raizFonte(s){
-  return chaveNome(String(s||"").split(/\s+[-–—\/·]\s*|\s*[:,]\s+/)[0]);
-}
-/* Qual coluna recebe o dinheiro desta fonte. Na ordem: nome inteiro igual ao da
-   coluna, depois a raiz igual, e por fim a coluna cujo nome começa a fonte — é o
-   que faz "Cartão pré-pago" cair na coluna "Cartão". Entre duas que sirvam, ganha
-   a mais específica. Nenhuma servindo, a fonte fica de fora e o app avisa. */
+/* Separadores aceitos entre o nome da coluna e o resto da descrição da fonte. */
+const SEPFONTE=" -–—/:,.·|_";
+/* Qual coluna recebe o dinheiro desta fonte.
+   Em vez de tentar adivinhar onde o nome termina, perguntamos o contrário: alguma
+   coluna COMEÇA esta fonte? Vale se o nome da fonte é igual ao da coluna, ou se
+   continua com um separador logo depois. Assim "espécie-tati-balão", "Espécie - tati"
+   e "Espécie: reserva" caem todas em "Espécie", enquanto "Wisely" não cai em "Wise".
+   Entre duas colunas que sirvam ganha a mais longa, então uma coluna "Cartão pré-pago"
+   tem preferência sobre "Cartão". Nenhuma servindo, a fonte fica de fora e o app avisa. */
 function meioDaFonte(t,fonte){
   const cheio=chaveNome(fonte); if(!cheio) return null;
-  const raiz=raizFonte(fonte), ms=meiosDe(t);
-  const exata = ms.find(m=>chaveNome(m.nome)===cheio) || ms.find(m=>chaveNome(m.nome)===raiz);
-  if(exata) return exata;
-  let melhor=null;
-  ms.forEach(m=>{
+  let melhor=null, tam=-1;
+  meiosDe(t).forEach(m=>{
     const n=chaveNome(m.nome); if(!n) return;
-    if(cheio.indexOf(n+" ")===0 || raiz.indexOf(n+" ")===0){
-      if(!melhor || n.length>chaveNome(melhor.nome).length) melhor=m;
-    }
+    const serve = cheio===n ||
+      (cheio.indexOf(n)===0 && SEPFONTE.indexOf(cheio.charAt(n.length))>=0);
+    if(serve && n.length>tam){ melhor=m; tam=n.length; }
   });
   return melhor;
 }
@@ -1618,9 +1613,11 @@ function painelMeios(t){
   if(soltas.length){
     const nomes=[...new Set(soltas.map(g=>g.fonte||"sem nome"))];
     h+=`<p class="aviso neutro">${soltas.length===1?"A fonte":"As fontes"}
-      <b>${nomes.map(esc).join(", ")}</b> não ${soltas.length===1?"aparece":"aparecem"} acima:
-      nenhuma coluna tem esse nome. Vale o que vem antes do travessão, então
-      <b>Espécie - tati</b> entra na coluna <b>Espécie</b>. Renomeie a coluna ou a fonte.</p>`;
+      <b>${nomes.map(esc).join(", ")}</b> não ${soltas.length===1?"entra":"entram"} no
+      <b>Já tenho</b> das colunas, mas ${soltas.length===1?"continua":"continuam"} contando no
+      total que você já tem — por isso <b>Faltam comprar</b> fica maior que <b>Falta juntar</b>.
+      Para casar, a fonte precisa começar com o nome de uma coluna: <b>Espécie-tati</b>,
+      <b>Wise / viagem</b> ou <b>Cartão: Nubank</b>. Renomeie a coluna ou a fonte.</p>`;
   }
 
   /* o que a distribuição diz sobre o orçamento */

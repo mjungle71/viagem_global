@@ -672,6 +672,8 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .calview .cv-leg{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 16px;font-size:12.5px;color:var(--ink-2)}
 .calview .cv-lg{display:flex;align-items:center;gap:6px}
 .calview .cv-lg i{width:13px;height:13px;border-radius:3px;border:1px solid;display:inline-block}
+.calbaixar{align-items:center;gap:8px;margin-top:8px}
+.calbt{font-size:12.5px;color:var(--ink-3)}
 .calview .cv-lgbt{background:none;border:0;padding:2px 4px;border-radius:7px;cursor:pointer;
   font-family:inherit;font-size:12.5px;color:var(--ink-2)}
 .calview .cv-lgbt:hover{background:var(--panel-2)}
@@ -2530,6 +2532,162 @@ h3{font-family:Georgia,serif;font-size:17px;margin:26px 0 2px}
 </div>${autoprint}</body></html>`;
 }
 
+/* ============================ Word e Excel ============================
+   Um .docx e um .xlsx são pastas de XML dentro de um ZIP. Em vez de carregar uma
+   biblioteca, montamos o ZIP à mão — sem compressão, que o formato aceita e os dois
+   programas abrem igual. São umas poucas dezenas de linhas e o app continua sem
+   depender de nada externo. */
+const CRC_TAB=(()=>{ const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+  return t; })();
+function crc32(b){ let c=0xFFFFFFFF; for(let i=0;i<b.length;i++) c=CRC_TAB[(c^b[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function bytesDe(s){ return new TextEncoder().encode(s); }
+function zipStore(arquivos){
+  const partes=[], dir=[]; let off=0;
+  const u16=v=>[v&255,(v>>8)&255];
+  const u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255];
+  arquivos.forEach(f=>{
+    const nome=bytesDe(f.nome), dados=f.dados, crc=crc32(dados);
+    const cab=[].concat([80,75,3,4],u16(20),u16(0),u16(0),u16(0),u16(0),
+      u32(crc),u32(dados.length),u32(dados.length),u16(nome.length),u16(0));
+    partes.push(new Uint8Array(cab),nome,dados);
+    dir.push({nome,crc,tam:dados.length,off});
+    off+=cab.length+nome.length+dados.length;
+  });
+  const central=[]; let tamCentral=0;
+  dir.forEach(e=>{
+    const cab=[].concat([80,75,1,2],u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),
+      u32(e.crc),u32(e.tam),u32(e.tam),u16(e.nome.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(e.off));
+    central.push(new Uint8Array(cab),e.nome);
+    tamCentral+=cab.length+e.nome.length;
+  });
+  const fim=new Uint8Array([].concat([80,75,5,6],u16(0),u16(0),u16(dir.length),u16(dir.length),
+    u32(tamCentral),u32(off),u16(0)));
+  const todas=partes.concat(central,[fim]);
+  const total=todas.reduce((a,x)=>a+x.length,0);
+  const saida=new Uint8Array(total); let p=0;
+  todas.forEach(x=>{ saida.set(x,p); p+=x.length; });
+  return saida;
+}
+function xmlEsc(s){
+  return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+}
+/* as linhas do calendário, já com a cor de cada cidade resolvida */
+function calLinhas(t){
+  const ag=(t.agenda||[]).slice().sort((a,b)=>String(a.data).localeCompare(String(b.data)));
+  const {corDe,escolhida}=calPaletaCidades(ag,t);
+  return ag.map(d=>{
+    const viagem=/Viajar/.test(d.atividade||"") && !escolhida[d.cidade];
+    const pal = viagem ? CAL_COR_VIAGEM : (corDe[d.cidade]||CAL_CORES[7].split("|"));
+    const dt=calDate(d.data);
+    return { data:d.data,
+      dataBR: dt?`${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`:(d.data||""),
+      dow: dt?CAL_DOW[dt.getDay()]:"",
+      cidade:d.cidade||"", atividade:d.atividade||"", nota:d.nota||"",
+      fundo:pal[0].replace("#",""), tinta:pal[1].replace("#","") };
+  });
+}
+function calTituloPeriodo(t){
+  return { titulo: (t.nome||"Viagem")+" — calendário",
+           periodo: t.inicio ? `${calFmtDataSimples(t.inicio)} a ${calFmtDataSimples(t.fim)}` : "" };
+}
+function calFmtDataSimples(iso){
+  const d=calDate(iso); if(!d) return String(iso||"");
+  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+}
+
+function docxCalendario(t){
+  const L=calLinhas(t), {titulo,periodo}=calTituloPeriodo(t);
+  const COLS=[1400,900,2100,4200,2400];
+  const celula=(txt,larg,o)=>
+    `<w:tc><w:tcPr><w:tcW w:w="${larg}" w:type="dxa"/>`+
+    (o&&o.fundo?`<w:shd w:val="clear" w:color="auto" w:fill="${o.fundo}"/>`:"")+
+    `</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr>`+
+    (o&&o.negrito?"<w:b/>":"")+`<w:sz w:val="18"/>`+
+    (o&&o.tinta?`<w:color w:val="${o.tinta}"/>`:"")+
+    `</w:rPr><w:t xml:space="preserve">${xmlEsc(txt)}</w:t></w:r></w:p></w:tc>`;
+  const cabecalho=`<w:tr><w:trPr><w:tblHeader/></w:trPr>`+
+    ["Data","Dia","Cidade","Atividade","Nota"].map((h,i)=>
+      celula(h,COLS[i],{negrito:true,fundo:"14614A",tinta:"FFFFFF"})).join("")+`</w:tr>`;
+  const linhas=L.map(l=>`<w:tr>`+
+    celula(l.dataBR,COLS[0],{fundo:l.fundo,tinta:l.tinta,negrito:true})+
+    celula(l.dow,COLS[1],{fundo:l.fundo,tinta:l.tinta})+
+    celula(l.cidade,COLS[2],{fundo:l.fundo,tinta:l.tinta})+
+    celula(l.atividade,COLS[3])+celula(l.nota,COLS[4])+`</w:tr>`).join("");
+  const doc=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+<w:p><w:pPr><w:spacing w:after="60"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="36"/><w:color w:val="14614A"/></w:rPr><w:t xml:space="preserve">${xmlEsc(titulo)}</w:t></w:r></w:p>
+<w:p><w:pPr><w:spacing w:after="220"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/><w:color w:val="4A5D56"/></w:rPr><w:t xml:space="preserve">${xmlEsc(periodo)}</w:t></w:r></w:p>
+<w:tbl><w:tblPr><w:tblW w:w="${COLS.reduce((a,b)=>a+b,0)}" w:type="dxa"/>
+<w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(b=>
+  `<w:${b} w:val="single" w:sz="4" w:space="0" w:color="D7DCD4"/>`).join("")}</w:tblBorders></w:tblPr>
+<w:tblGrid>${COLS.map(c=>`<w:gridCol w:w="${c}"/>`).join("")}</w:tblGrid>
+${cabecalho}${linhas}</w:tbl>
+<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr>
+</w:body></w:document>`;
+  return zipStore([
+    {nome:"[Content_Types].xml", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`)},
+    {nome:"_rels/.rels", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`)},
+    {nome:"word/document.xml", dados:bytesDe(doc)}
+  ]);
+}
+
+function xlsxCalendario(t){
+  const L=calLinhas(t), {titulo,periodo}=calTituloPeriodo(t);
+  /* uma cor de preenchimento por paleta, mais o cabeçalho */
+  const fundos=CAL_CORES.map(p=>p.split("|")[0].replace("#","")).concat(["14614A"]);
+  const fills=`<fills count="${fundos.length+2}"><fill><patternFill patternType="none"/></fill>`+
+    `<fill><patternFill patternType="gray125"/></fill>`+
+    fundos.map(c=>`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`).join("")+
+    `</fills>`;
+  const estilos=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+${fills}<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="${fundos.length+1}">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+${CAL_CORES.map((p,i)=>`<xf numFmtId="0" fontId="0" fillId="${i+2}" borderId="0" xfId="0" applyFill="1"/>`).join("")}
+<xf numFmtId="0" fontId="1" fillId="${fundos.length+1}" borderId="0" xfId="0" applyFill="1" applyFont="1"/>
+</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const ESTILO_CAB=CAL_CORES.length+1;
+  const idxPaleta=f=>{ const i=CAL_CORES.findIndex(p=>p.split("|")[0].replace("#","")===f); return i<0?0:i+1; };
+  const col=n=>{ let s=""; n++; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26); } return s; };
+  const celTxt=(c,r,v,est)=>v===""?"":`<c r="${col(c)}${r}"${est?` s="${est}"`:""} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`;
+  let linhas=`<row r="1">${celTxt(0,1,titulo,ESTILO_CAB)}</row><row r="2">${celTxt(0,2,periodo)}</row>`;
+  linhas+=`<row r="4">`+["Data","Dia","Cidade","Atividade","Nota"]
+    .map((h,i)=>celTxt(i,4,h,ESTILO_CAB)).join("")+`</row>`;
+  L.forEach((l,n)=>{
+    const r=n+5, e=idxPaleta(l.fundo);
+    linhas+=`<row r="${r}">`+
+      celTxt(0,r,l.dataBR,e)+celTxt(1,r,l.dow,e)+celTxt(2,r,l.cidade,e)+
+      celTxt(3,r,l.atividade)+celTxt(4,r,l.nota)+`</row>`;
+  });
+  const sheet=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<cols><col min="1" max="1" width="13" customWidth="1"/><col min="2" max="2" width="7" customWidth="1"/>
+<col min="3" max="3" width="22" customWidth="1"/><col min="4" max="4" width="46" customWidth="1"/>
+<col min="5" max="5" width="30" customWidth="1"/></cols>
+<sheetData>${linhas}</sheetData></worksheet>`;
+  return zipStore([
+    {nome:"[Content_Types].xml", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`)},
+    {nome:"_rels/.rels", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`)},
+    {nome:"xl/workbook.xml", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Calendário" sheetId="1" r:id="rId1"/></sheets></workbook>`)},
+    {nome:"xl/_rels/workbook.xml.rels", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`)},
+    {nome:"xl/styles.xml", dados:bytesDe(estilos)},
+    {nome:"xl/worksheets/sheet1.xml", dados:bytesDe(sheet)}
+  ]);
+}
+
 function imprimirCalendario(){
   const t=trip(); if(!t) return;
   if(!(t.agenda&&t.agenda.length)){ toast("Gere o calendário primeiro"); return; }
@@ -2537,18 +2695,44 @@ function imprimirCalendario(){
   if(!w){ toast("Permita pop-ups para imprimir"); return; }
   w.document.write(htmlCalendario(t,true)); w.document.close();
 }
-function baixarCalendario(){
-  const t=trip(); if(!t) return;
-  if(!(t.agenda&&t.agenda.length)){ toast("Gere o calendário primeiro"); return; }
-  const html=htmlCalendario(t,false);
-  const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+function slugViagem(t){
+  return (t.nome||"viagem").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"")
+    .replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "viagem";
+}
+function salvarArquivo(nome, dados, mime){
+  const blob=new Blob([dados],{type:mime});
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a");
-  const slug=(t.nome||"viagem").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
-  a.href=url; a.download=`calendario-${slug||"viagem"}.html`;
+  a.href=url; a.download=nome;
   document.body.appendChild(a); a.click();
   setTimeout(()=>{ a.remove(); URL.revokeObjectURL(url); },200);
-  toast("Calendário baixado");
+}
+/* formato: "html" | "pdf" | "docx" | "xlsx" */
+function baixarCalendario(formato){
+  const t=trip(); if(!t) return;
+  if(!(t.agenda&&t.agenda.length)){ toast("Gere o calendário primeiro"); return; }
+  const base="calendario-"+slugViagem(t);
+  try{
+    if(formato==="pdf"){
+      /* o próprio navegador gera um PDF melhor, com texto selecionável, do que
+         qualquer conversão que a gente fizesse aqui */
+      imprimirCalendario();
+      toast("Na janela que abriu, escolha Salvar como PDF");
+      return;
+    }
+    if(formato==="docx"){
+      salvarArquivo(base+".docx", docxCalendario(t),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      toast("Calendário em Word baixado"); return;
+    }
+    if(formato==="xlsx"){
+      salvarArquivo(base+".xlsx", xlsxCalendario(t),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      toast("Calendário em Excel baixado"); return;
+    }
+    salvarArquivo(base+".html", htmlCalendario(t,false), "text/html;charset=utf-8");
+    toast("Calendário em HTML baixado");
+  }catch(e){ toast("Não consegui gerar o arquivo: "+(e.message||e)); }
 }
 
 function secaoCalendario(t){
@@ -2628,7 +2812,13 @@ function secaoCalendario(t){
       <div class="calacts">
         <button class="btn small" data-act="editarcal">Editar</button>
         <button class="btn small" data-act="imprimircal">Imprimir</button>
-        <button class="btn small" data-act="baixarcal">Baixar calendário</button>
+      </div>
+      <div class="calacts calbaixar">
+        <span class="calbt">Baixar em</span>
+        <button class="btn small" data-baixarcal="html">HTML</button>
+        <button class="btn small" data-baixarcal="pdf">PDF</button>
+        <button class="btn small" data-baixarcal="docx">Word</button>
+        <button class="btn small" data-baixarcal="xlsx">Excel</button>
       </div>`;
   }
 
@@ -3323,6 +3513,7 @@ document.addEventListener("click",e=>{
     touch(tr.id); render(); return;
   }
   /* clicar na cidade na legenda abre (ou fecha) as paletas */
+  if(t.dataset.baixarcal){ baixarCalendario(t.dataset.baixarcal); return; }
   if(t.dataset.calcor){
     const alvo=t.dataset.calcor;
     state.calCorSel = (state.calCorSel===alvo) ? null : alvo;
@@ -3493,7 +3684,7 @@ document.addEventListener("click",e=>{
   if(act==="parcelar"){ state.modal="parcelar"; renderModal(); return; }
   if(act==="lancarparcelas"){ lancarParcelas(); return; }
   if(act==="imprimircal"){ imprimirCalendario(); return; }
-  if(act==="baixarcal"){ baixarCalendario(); return; }
+  if(act==="baixarcal"){ baixarCalendario("html"); return; }
   if(act==="gerarcal"){ const tr=trip(); if(tr) gerarAgendaDeMarcos(tr,false); return; }
   if(act==="editarcal"){ const tr=trip(); if(tr){ tr.calView="edit"; state.abertos=state.abertos||{}; state.abertos.calendario=true; touch(tr.id); render(); } return; }
   if(act==="concluircal"){ const tr=trip(); if(tr){ tr.calView="grade"; state.abertos=state.abertos||{}; state.abertos.calendario=true; touch(tr.id); render(); } return; }

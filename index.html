@@ -672,6 +672,17 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .calview .cv-leg{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 16px;font-size:12.5px;color:var(--ink-2)}
 .calview .cv-lg{display:flex;align-items:center;gap:6px}
 .calview .cv-lg i{width:13px;height:13px;border-radius:3px;border:1px solid;display:inline-block}
+.calview .cv-lgbt{background:none;border:0;padding:2px 4px;border-radius:7px;cursor:pointer;
+  font-family:inherit;font-size:12.5px;color:var(--ink-2)}
+.calview .cv-lgbt:hover{background:var(--panel-2)}
+.cv-pal{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:-6px 0 16px;
+  padding:9px 11px;border:1px solid var(--rule);border-radius:10px;background:var(--panel)}
+.cv-palt{font-size:12.5px;color:var(--ink-2);margin-right:2px}
+.cv-sw{width:24px;height:24px;border-radius:7px;border:1.5px solid;cursor:pointer;padding:0}
+.cv-sw.sel{outline:2px solid var(--green);outline-offset:2px}
+.cv-palauto{background:none;border:1px solid var(--rule);border-radius:999px;padding:3px 11px;
+  font-family:inherit;font-size:12px;color:var(--ink-2);cursor:pointer}
+.cv-palauto:hover{border-color:var(--green);color:var(--green)}
 .calview .cv-mes{margin-bottom:22px}
 .calview .cv-mesh{font-family:"Newsreader",serif;font-size:18px;font-weight:600;margin:0 0 8px;color:var(--ink)}
 .calview .cv-dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
@@ -2376,11 +2387,20 @@ function gerarAgendaDeMarcos(t, silencioso){
   if(!silencioso){ render(); toast(`Calendário gerado: ${t.agenda.length} dias`); }
 }
 
-/* Paleta por cidade, determinística a partir da agenda. */
-function calPaletaCidades(ag){
+/* Cor de cada cidade no calendário. Por padrão é automática: a ordem em que a
+   cidade aparece na agenda escolhe a paleta, dando a volta quando passa de oito.
+   Se você escolher uma cor para a cidade (clicando nela na legenda), a escolha
+   vale e fica gravada em t.calCor. */
+function calPaletaCidades(ag,t){
   const cidades=[...new Set(ag.map(d=>d.cidade).filter(Boolean))];
-  const corDe={}; cidades.forEach((c,i)=>{ corDe[c]=CAL_CORES[i%CAL_CORES.length].split("|"); });
-  return {cidades,corDe};
+  const escolhas=(t&&t.calCor)||{}, corDe={}, escolhida={};
+  cidades.forEach((c,i)=>{
+    const e=escolhas[c];
+    const idx = (e!=null && CAL_CORES[e]) ? e : (i%CAL_CORES.length);
+    corDe[c]=CAL_CORES[idx].split("|");
+    escolhida[c] = (e!=null && CAL_CORES[e]) ? true : false;
+  });
+  return {cidades,corDe,escolhida};
 }
 
 /* Miolo visual (grade mensal + legenda + lista). Usado inline no app e no arquivo baixado.
@@ -2388,7 +2408,7 @@ function calPaletaCidades(ag){
 function calGradeInner(t, pfx){
   pfx=pfx||"";
   const ag=(t.agenda||[]).slice().sort((a,b)=>String(a.data).localeCompare(String(b.data)));
-  const {cidades,corDe}=calPaletaCidades(ag);
+  const {cidades,corDe,escolhida}=calPaletaCidades(ag,t);
   const porMes={};
   ag.forEach(d=>{ const dt=calDate(d.data); if(!dt) return; const k=`${dt.getFullYear()}-${dt.getMonth()}`; (porMes[k]=porMes[k]||[]).push(d); });
   let grades="";
@@ -2403,7 +2423,9 @@ function calGradeInner(t, pfx){
     for(let dia=1;dia<=ultimoDiaMes;dia++){
       const d=mapDia[dia];
       if(!d){ celulas+=`<div class="${pfx}cel ${pfx}fora"><span class="${pfx}num">${dia}</span></div>`; continue; }
-      const temViagem=/Viajar/.test(d.atividade||"");
+      /* O cinza de "dia de viagem" é um padrão, não uma regra: se você escolheu
+         uma cor para a cidade, a sua escolha ganha. */
+      const temViagem=/Viajar/.test(d.atividade||"") && !escolhida[d.cidade];
       const pal = temViagem ? CAL_COR_VIAGEM : (corDe[d.cidade]||CAL_CORES[7].split("|"));
       const [bg,tx,sub]=pal;
       const titulo = esc(d.cidade|| (temViagem?"Em trânsito":"") );
@@ -2422,7 +2444,7 @@ function calGradeInner(t, pfx){
   });
   let lista="";
   ag.forEach(d=>{
-    const temViagem=/Viajar/.test(d.atividade||"");
+    const temViagem=/Viajar/.test(d.atividade||"") && !escolhida[d.cidade];
     const pal = temViagem ? CAL_COR_VIAGEM : (corDe[d.cidade]||CAL_CORES[7].split("|"));
     lista+=`<tr>
       <td class="${pfx}ld"><span class="${pfx}pt" style="background:${pal[2]}"></span>${calFmtData(d.data)}</td>
@@ -2431,9 +2453,30 @@ function calGradeInner(t, pfx){
       <td class="${pfx}ln">${esc(d.nota||"")}</td>
     </tr>`;
   });
-  let legenda=cidades.map(c=>{ const [bg,tx,sub]=corDe[c]; return `<span class="${pfx}lg"><i style="background:${bg};border-color:${sub}"></i>${esc(c)}</span>`; }).join("");
+  /* No app a legenda é clicável: cada cidade abre as paletas. No arquivo baixado
+     ela é só legenda, então sai como texto simples. */
+  const noApp = pfx==="cv-";
+  let legenda=cidades.map(c=>{
+    const [bg,tx,sub]=corDe[c];
+    const bolinha=`<i style="background:${bg};border-color:${sub}"></i>${esc(c)}`;
+    return noApp
+      ? `<button class="${pfx}lg ${pfx}lgbt" data-calcor="${esc(c)}"
+           title="Escolher a cor de ${esc(c)}">${bolinha}</button>`
+      : `<span class="${pfx}lg">${bolinha}</span>`;
+  }).join("");
   legenda+=`<span class="${pfx}lg"><i style="background:${CAL_COR_VIAGEM[0]};border-color:${CAL_COR_VIAGEM[2]}"></i>Dia de viagem</span>`;
-  return {grades,lista,legenda};
+  let paleta="";
+  if(noApp && state.calCorSel && cidades.indexOf(state.calCorSel)>=0){
+    const alvo=state.calCorSel, atual=((t&&t.calCor)||{})[alvo];
+    paleta=`<div class="cv-pal">
+      <span class="cv-palt">Cor de <b>${esc(alvo)}</b></span>
+      ${CAL_CORES.map((p,i)=>{ const [bg,,sub]=p.split("|");
+        return `<button class="cv-sw${atual===i?" sel":""}" data-calpal="${i}"
+          style="background:${bg};border-color:${sub}" title="Paleta ${i+1}"></button>`;}).join("")}
+      <button class="cv-palauto" data-calpal="auto">automático</button>
+    </div>`;
+  }
+  return {grades,lista,legenda,paleta};
 }
 
 /* Documento HTML autônomo (download / impressão). */
@@ -2572,10 +2615,11 @@ function secaoCalendario(t){
         <button class="btn primary small" data-act="concluircal">Concluir edição</button>
       </div>`;
   } else {
-    const {grades,lista,legenda}=calGradeInner(t,"cv-");
+    const {grades,lista,legenda,paleta}=calGradeInner(t,"cv-");
     passo3=`<div class="calstep" style="margin-top:18px">3 · Calendário</div>
       <div class="calview">
         <div class="cv-leg">${legenda}</div>
+        ${paleta||""}
         ${grades}
         <h3 class="cv-h3">Dia a dia</h3>
         <table class="cv-tbl"><thead><tr><th>Data</th><th>Cidade</th><th>Atividade</th><th>Nota</th></tr></thead>
@@ -3276,6 +3320,22 @@ document.addEventListener("click",e=>{
   if(t.dataset.delmk){
     const tr=trip(); if(!tr) return;
     tr.marcos=(tr.marcos||[]).filter(r=>r.id!==t.dataset.delmk);
+    touch(tr.id); render(); return;
+  }
+  /* clicar na cidade na legenda abre (ou fecha) as paletas */
+  if(t.dataset.calcor){
+    const alvo=t.dataset.calcor;
+    state.calCorSel = (state.calCorSel===alvo) ? null : alvo;
+    state.abertos=state.abertos||{}; state.abertos.calendario=true;
+    render(); return;
+  }
+  /* escolher a paleta, ou voltar para o automático */
+  if(t.dataset.calpal){
+    const tr=trip(); if(!tr || !state.calCorSel) return;
+    tr.calCor=tr.calCor||{};
+    if(t.dataset.calpal==="auto") delete tr.calCor[state.calCorSel];
+    else tr.calCor[state.calCorSel]=num(t.dataset.calpal);
+    state.abertos=state.abertos||{}; state.abertos.calendario=true;
     touch(tr.id); render(); return;
   }
   if(t.dataset.addcal){

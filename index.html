@@ -3137,24 +3137,6 @@ function renderCambio(){
     <label class="chk" style="margin-top:10px"><input type="checkbox" data-tg="cambioAuto" ${t.cambioAuto?"checked":""}>
       <span>Atualizar ao abrir esta viagem</span></label>`;
 }
-function renderReservaBody(){
-  const t=trip(); if(!t) return;
-  const el=document.getElementById("resbody"); if(!el) return;
-  const sym=MOEDAS[t.moeda]?MOEDAS[t.moeda].s:t.moeda;
-  const cur=t.reservaModo==="meta"?(t.metaCur||"FX"):(t.reservaCur||"BRL");
-  const campo=t.reservaModo==="meta"?"meta":"reserva";
-  el.innerHTML=`<div class="rrow">
-      <p>${t.reservaModo==="meta"
-        ? "Defina o teto da viagem: a reserva é o que sobra depois de tudo o que já foi lançado."
-        : "Valor que você quer levar de folga, somado ao total."}</p>
-      <div style="display:flex;gap:6px;align-items:center;width:190px">
-        <button class="cur" data-rescur="1">${esc(cur==="FX"?sym:"R$")}</button>
-        <input type="text" inputmode="decimal" class="ta-r" data-t="${campo}" data-n="2" value="${fmt(num(t[campo]))}"
-          style="flex:1;background:var(--panel-2);border:1px solid var(--rule);border-radius:6px;padding:7px 9px">
-      </div>
-    </div>
-    <p data-calc="restxt"></p>`;
-}
 
 /* ============================ atualização de números ============================ */
 function put(key,txt){ document.querySelectorAll(`[data-calc="${key}"]`).forEach(e=>e.textContent=txt); }

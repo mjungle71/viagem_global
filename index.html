@@ -1671,15 +1671,16 @@ function painelPoupanca(t){
       Nada lançado. Some aqui o que já tem: espécie, Wise, conta, cartão pré-pago.</div></div>`;
   }
   gs.forEach(g=>{
-    const semTaxa = g.moeda!=="BRL" && !(num(g.taxa)||taxaPadrao(t,g.moeda));
+    const taxaFixa = g.moeda==="BRL" || (g.moeda===t.moeda && num(t.cambio)>0);
+    const semTaxa = !taxaFixa && !(num(g.taxa)||taxaPadrao(t,g.moeda));
     h+=`<div class="lrow" style="grid-template-columns:var(--g)" data-rid="${g.id}">
       <div class="cell wide" data-l="Onde está"><input type="text" list="fontesdin" data-g="${g.id}.fonte"
         value="${esc(g.fonte||"")}" placeholder="Wise - tati"></div>
       <div class="cell" data-l="Moeda"><select data-g="${g.id}.moeda">${moedaOpts(g.moeda||"BRL")}</select></div>
       <div class="cell" data-l="Valor"><input type="text" inputmode="decimal" class="ta-r" data-g="${g.id}.valor"
         data-n="2" value="${fmt(num(g.valor))}"></div>
-      <div class="cell" data-l="R$ por 1">${g.moeda==="BRL"
-        ? `<span class="fixo1">1,0000</span>`
+      <div class="cell" data-l="R$ por 1">${taxaFixa
+        ? `<span class="fixo1" title="${g.moeda==="BRL"?"Real vale 1":"Segue o câmbio da viagem"}">${fmt(taxaDaFonte(t,g),4)}</span>`
         : `<input type="text" inputmode="decimal" class="ta-r${semTaxa?" faltando":""}" data-g="${g.id}.taxa" data-n="4"
             value="${fmt(num(g.taxa)||taxaPadrao(t,g.moeda),4)}">`}</div>
       <div class="rowtot" data-l="Em ${esc(simboloDe(alvo))}"><span data-calc="gr:${g.id}"></span></div>
@@ -5113,9 +5114,16 @@ function emMoeda(t,valorBRL,moeda){
   if(!(tx>0)) return "—";
   return simboloDe(moeda)+" "+fmt(valorBRL/tx);
 }
+/* Dinheiro guardado na moeda da propria viagem acompanha o cambio da viagem.
+   Congelar uma cotacao por linha fazia a mesma nota de euro valer uma coisa na
+   linha e outra no topo: ida e volta pelo real encolhia o euro que ja esta na
+   mao. Nas demais moedas continua valendo a cotacao digitada na linha. */
+function taxaDaFonte(t,g){
+  if(g && g.moeda && g.moeda===t.moeda && num(t.cambio)>0) return num(t.cambio);
+  return num(g.taxa) || taxaPadrao(t,g.moeda);
+}
 function valorEmBRL(t,g){
-  const tx=num(g.taxa)|| taxaPadrao(t,g.moeda);
-  return num(g.valor)*tx;
+  return num(g.valor)*taxaDaFonte(t,g);
 }
 function totalGuardado(t){
   return (t.guardados||[]).reduce((s,g)=>s+valorEmBRL(t,g),0);

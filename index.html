@@ -96,7 +96,6 @@ h1,h2,h3{margin:0;font-family:"Newsreader",Georgia,serif;font-weight:500;letter-
 }
 .yr:hover{color:var(--ink)}
 .yr[aria-current="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--green)}
-.yr small{display:block;font-size:10.5px;font-weight:400;color:var(--ink-3);letter-spacing:.02em}
 
 main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
 
@@ -939,10 +938,6 @@ function compute(t){
   out.porPessoaDia=out.total/out.pax/out.dias;
   return out;
 }
-function totalAno(ano){
-  return state.trips.filter(t=>t.ano===ano).reduce((s,t)=>s+compute(t).total,0);
-}
-
 /* --- rota de voo: "GRU- GIG", "GRU > GIG", "GRU/GIG" viram De + Para --- */
 const SEPARADOR=/\s*(?:→|-{1,2}>|>|\/|\||\bpara\b)\s*|\s+-\s*|\s*-\s+/i;
 function partirRota(txt){
@@ -1188,9 +1183,7 @@ function anosDisponiveis(){
 function renderYears(){
   const el=document.getElementById("years");
   el.innerHTML = anosDisponiveis().map(a=>{
-    const tot=totalAno(a);
-    return `<button class="yr" data-ano="${a}" aria-current="${a===state.ano}">${a}
-      <small>${tot?("R$ "+fmt(tot,0)):"—"}</small></button>`;
+    return `<button class="yr" data-ano="${a}" aria-current="${a===state.ano}">${a}</button>`;
   }).join("") + `<button class="yr" data-addyear="1" title="Adicionar ano">+</button>`;
 }
 

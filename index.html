@@ -664,6 +664,34 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .calbody>div{overflow:hidden}
 .calsec.aberto .calbody{grid-template-rows:1fr}
 .calinner{padding:4px 16px 16px}
+/* ---- folha de escolha do relatório ---- */
+.relsheet{width:min(720px,100%)}
+.relbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:10px 13px;margin:0 0 12px;border:1px solid var(--rule);border-radius:10px;
+  background:var(--panel-2)}
+.reltodos{display:inline-flex;align-items:center;gap:7px;margin:0;cursor:pointer;
+  font-size:12px;color:var(--ink-3);text-transform:none;letter-spacing:0}
+.reltodos.forte{font-size:13.5px;font-weight:600;color:var(--ink)}
+.reltodos input,.relopt input{width:16px;height:16px;margin:0;accent-color:var(--green);
+  cursor:pointer;flex:0 0 auto}
+.relgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;
+  margin-bottom:4px}
+.relsec{border:1px solid var(--rule-2);border-radius:10px;padding:10px 12px 8px}
+.relsect{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-bottom:7px;margin-bottom:4px;border-bottom:1px solid var(--rule-2)}
+.relsect b{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--green)}
+.relnada{font-size:11px;color:var(--ink-3)}
+.relopt{display:grid;grid-template-columns:16px 1fr;gap:3px 9px;align-items:center;
+  margin:0;padding:5px 0;cursor:pointer;text-transform:none;letter-spacing:0}
+.relopt:hover .relnome{color:var(--green)}
+.relnome{font-size:13.5px;color:var(--ink);line-height:1.25}
+.relsub{grid-column:2;font-size:10.5px;color:var(--ink-3);line-height:1.2}
+.relsub:empty{display:none}
+.relopt.off{cursor:default;opacity:.45}
+.relopt.off:hover .relnome{color:var(--ink)}
+/* a linha do relatório, acima das categorias */
+.relbarra{display:flex;justify-content:flex-end;margin:0 0 14px}
+@media (max-width:640px){ .relbarra .btn{flex:1;text-align:center} }
 .calacts{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .calstep{font-family:"Newsreader",serif;font-size:15px;font-weight:600;color:var(--green);margin:0 0 2px}
 /* grade inline no app (prefixo cv-) */
@@ -1011,7 +1039,8 @@ let state={trips:[],view:"ano",ano:new Date().getFullYear(),tripId:null,abertos:
            modo:"local", sync:null, erroSync:"", salvando:false, importado:null,
            cotacao:null, buscandoCotacao:false, voos:null, hoteis:null, atr:null, perna:"todas", geocodando:false, rotulosFixos:false,
            localId:null, sugestoes:[], buscando:false, distA:"", distB:"", distRes:null,
-           otim:null, otimPerfil:"pe", otimFechado:false, otimizando:false, erroMapa:""};
+           otim:null, otimPerfil:"pe", otimFechado:false, otimizando:false, erroMapa:"",
+           relSel:null, relSelTrip:null, relPessoa:false};
 let db=null, saveTimer=null, dirty=new Set();
 
 /* Supabase — projeto decora3d, tabela vg_viagens_global.
@@ -2729,6 +2758,497 @@ function baixarCalendario(formato){
   }catch(e){ toast("Não consegui gerar o arquivo: "+(e.message||e)); }
 }
 
+/* ========================= relatório da viagem =========================
+   Um conteúdo só, dois destinos. relGrupos monta BLOCOS neutros — pares,
+   tabela, nota — e quem desenha é relHTML, que o navegador imprime ou salva
+   em PDF, ou relDOCX, que o Word abre. Assim o relatório existe uma vez e
+   não duas: acrescentar um grupo não obriga a mexer nos dois lados.
+   A ordem conta a lógica da viagem: o que foi planejado, o que já saiu, e
+   os dois lado a lado. */
+
+/* Cor de categoria em hexa: no Word não existe var(--green). */
+const REL_TINTA={"var(--green)":"14614A","var(--green-2)":"2E8F6F","var(--olive)":"7FA65C",
+  "var(--gold)":"C08A2E","var(--clay)":"A85B3C","var(--blue)":"4A6FA5","var(--slate)":"6B7B76"};
+const relHex=c=>REL_TINTA[c]||String(c||"").replace("#","").toUpperCase()||"6B7B76";
+const REL_NEG="9E3B3B", REL_POS="14614A";
+const REL_SECOES=[
+  {k:"viagem", nome:"A viagem", capa:true},
+  {k:"plano",  nome:"Planejado"}
+];
+function relData(iso){
+  if(!iso) return "—";
+  const p=String(iso).split("-");
+  return p.length===3 ? p[2]+"/"+p[1]+"/"+p[0] : String(iso);
+}
+/* largura relativa de cada coluna, deduzida do tipo do campo */
+function relPeso(col){
+  if(col.t==="detalhe") return 3;
+  if(col.t==="rota"||col.t==="text") return col.wide?4:3;
+  if(col.t==="date"||col.t==="money"||col.t==="modo") return 2;
+  return 1;
+}
+const relDir=col=>(col.t==="money"||col.t==="int")?1:0;
+function relCelulaCat(col,r,t){
+  if(col.t==="rota") return rotaTexto(r)||"—";
+  if(col.t==="date") return relData(r[col.k]);
+  if(col.t==="money"){
+    const sym = r.cur==="FX" ? ((MOEDAS[t.moeda]||{}).s||t.moeda) : "R$";
+    return {v:sym+" "+fmt(num(r[col.k])), r:1};
+  }
+  if(col.t==="int") return {v: col.k==="pax" ? String(paxOf(r,t)) : fmt(num(r[col.k]),0), r:1};
+  return String(r[col.k]==null?"":r[col.k]) || "—";
+}
+
+/* Os grupos que o relatório pode ter. Cada um sabe se está vazio — grupo sem
+   nada lançado não entra na lista de escolhas, para não prometer página em
+   branco. */
+function relGrupos(t){
+  const c=compute(t);
+  const pax=totalPax(t)||1, porPessoa=!!state.relPessoa;
+  const v=x=>porPessoa?x/pax:x;
+  const din=x=>brl(v(x));
+  const dias=diasViagem(t)||0;
+  const G=[];
+  const add=(id,sec,nome,sub,vazio,blocos)=>G.push({id,sec,nome,sub:sub||"",vazio:!!vazio,blocos});
+
+  /* ---------------- a viagem ---------------- */
+  add("resumo","viagem","Resumo da viagem","quem vai, quando, e quanto custa",false,()=>{
+    const ad=num(t.adultos), cr=num(t.criancas);
+    const it=[
+      ["Viagem", t.nome||"—"],
+      ["Roteiro", t.destino||"—"],
+      ["Período", (t.inicio&&t.fim) ? relData(t.inicio)+" a "+relData(t.fim) : "sem datas"],
+      ["Dias", dias?String(dias):"—"],
+      ["Pessoas", ad+(ad===1?" adulto":" adultos")+(cr>0?" e "+cr+(cr===1?" criança":" crianças"):"")]
+    ];
+    it.push(["Moeda", t.moeda+" — R$ "+fmt(num(t.cambio),4)+" por 1"]);
+    it.push(["Custo planejado", din(c.sub)]);
+    if(c.reserva>0.005) it.push(["Reserva", din(c.reserva)+" — dentro do teto"]);
+    if(c.meta>0.005) it.push(["Teto", din(c.meta)]);
+    if(porPessoa){ if(dias>0) it.push(["Por dia", brl(c.sub/pax/dias)]); }
+    else{
+      it.push(["Por pessoa", brl(c.sub/pax)]);
+      if(dias>0) it.push(["Por pessoa, por dia", brl(c.sub/pax/dias)]);
+    }
+    const b=[{t:"kv",itens:it}];
+    if(porPessoa) b.push({t:"nota",txt:"Todos os totais deste relatório estão divididos por "+pax+" — são a parte de uma pessoa. Os valores unitários de cada linha continuam como foram lançados."});
+    return b;
+  });
+
+  /* ---------------- planejado ---------------- */
+  add("orcamento","plano","Resumo do orçamento","o peso de cada categoria", c.sub<=0.005, ()=>{
+    const linhas=CATS.map(cat=>{
+      const val=num(c.cats[cat.key]), qt=(t[cat.key]||[]).length;
+      return [{v:cat.nome,cor:cat.cor},{v:qt?String(qt):"—",r:1},
+              {v:c.sub>0?fmt(val/c.sub*100,1)+"%":"—",r:1},{v:din(val),r:1}];
+    });
+    const b=[{t:"tab",
+      cols:[{l:"Categoria",w:4},{l:"Linhas",w:1,r:1},{l:"Peso",w:1,r:1},{l:"Planejado",w:2,r:1}],
+      linhas,
+      total:[{v:"Subtotal",b:1},{v:""},{v:"100%",r:1},{v:din(c.sub),r:1}]}];
+    const it=[];
+    if(c.reserva>0.005){
+      it.push(["Reserva, dentro do teto", din(c.reserva)]);
+      it.push(["Subtotal com a reserva", din(c.total)]);
+    }
+    if(c.meta>0.005){
+      it.push(["Teto", din(c.meta)]);
+      it.push(["Dá para gastar sem tocar na reserva", din(c.semReserva)]);
+      if(c.excedente>0.005) it.push(["Passou do teto em", din(c.excedente), "neg"]);
+      else if(c.reservaUsada>0.005) it.push(["Da reserva, já comprometido", din(c.reservaUsada), "neg"]);
+      else it.push(["Folga antes da reserva", din(c.folga), "pos"]);
+    }
+    if(it.length) b.push({t:"kv",itens:it});
+    return b;
+  });
+
+  CATS.forEach(cat=>{
+    const rows=t[cat.key]||[];
+    add(cat.key,"plano",cat.nome, rows.length+(rows.length===1?" linha":" linhas"), !rows.length, ()=>{
+      const cols=cat.cols.map(col=>({l:col.l||"Detalhe",w:relPeso(col),r:relDir(col)}))
+                         .concat([{l:"Em R$",w:2,r:1}]);
+      const linhas=rows.map((r,i)=>{
+        const cells=cat.cols.map(col=>{
+          const x=relCelulaCat(col,r,t);
+          return typeof x==="string" ? {v:x, r:relDir(col)} : x;
+        });
+        cells.push({v:brl(v(((c.rows[cat.key]||[])[i]||{}).brl||0)), r:1});
+        return cells;
+      });
+      const total=cols.map((col,i)=> i===0 ? {v:"Total",b:1}
+        : i===cols.length-1 ? {v:din(num(c.cats[cat.key])),r:1} : {v:"",r:col.r});
+      return [{t:"tab",cols,linhas,total}];
+    });
+  });
+
+  const rot=t.roteiro||[];
+  add("roteiro","plano","Roteiro","as paradas, em ordem", !rot.length, ()=>{
+    const linhas=rot.map(r=>{
+      const n=(r.chegada&&r.saida)?difData(r.chegada,r.saida):0;
+      return [{v:r.cidade||"—"},{v:r.pais||"—"},{v:relData(r.chegada),r:1},{v:relData(r.saida),r:1},
+              {v: n>0?String(n) : ((r.chegada&&r.saida)?"mesmo dia":"—"), r:1}];
+    });
+    return [{t:"tab",cols:[{l:"Cidade",w:3},{l:"Estado / país",w:3},{l:"Chegada",w:2,r:1},
+      {l:"Saída",w:2,r:1},{l:"Noites",w:1,r:1}],linhas}];
+  });
+
+  const ag=t.agenda||[];
+  add("diaadia","plano","Dia a dia", ag.length+(ag.length===1?" dia":" dias"), !ag.length, ()=>{
+    return [{t:"tab",cols:[{l:"Data",w:2},{l:"Dia",w:1},{l:"Cidade",w:3},{l:"Atividade",w:5},{l:"Nota",w:3}],
+      linhas:calLinhas(t).map(l=>[{v:l.dataBR},{v:l.dow},{v:l.cidade},{v:l.atividade},{v:l.nota}])}];
+  });
+
+  const meses=mesesDoPlano(t);
+  const comPlano=meses.filter(m=>totalMesPlano(t,m)>0.005);
+  add("pagamento","plano","Plano de pagamento","quando cada parcela sai", !comPlano.length, ()=>{
+    const lp=linhasDoPlano(t);
+    let acum=0;
+    const linhas=comPlano.map(m=>{
+      const tot=totalMesPlano(t,m); acum+=tot;
+      const quais=lp.filter(l=>valPlano(t,m,l.k)>0.005)
+        .map(l=>l.nome+" "+brl(v(valPlano(t,m,l.k)))).join(" · ");
+      return [{v:rotuloMes(m)},{v:quais||"—"},{v:brl(v(tot)),r:1},{v:brl(v(acum)),r:1}];
+    });
+    const b=[{t:"tab",cols:[{l:"Mês",w:2},{l:"O que cobre",w:7},{l:"No mês",w:2,r:1},{l:"Acumulado",w:2,r:1}],
+      linhas, total:[{v:"Total parcelado",b:1},{v:""},{v:brl(v(acum)),r:1},{v:"",r:1}]}];
+    const falta=lp.map(l=>({nome:l.nome,f:faltaDaCategoria(t,l.k,c)})).filter(x=>x.f>0.005);
+    if(falta.length) b.push({t:"nota",txt:"Ainda sem parcelas: "+
+      falta.map(x=>x.nome+" "+brl(v(x.f))).join(" · ")+"."});
+    return b;
+  });
+
+  add("obs","plano","Observações","", !String(t.obs||"").trim(),
+    ()=>[{t:"texto",txt:String(t.obs||"")}]);
+
+  return G;
+}
+
+/* Achata os grupos escolhidos numa lista de blocos, com o cabeçalho de cada
+   seção aparecendo uma vez. A capa não leva cabeçalho: o título já é ela. */
+function relBlocos(t,ids){
+  const out=[]; let sec="";
+  relGrupos(t).forEach(g=>{
+    if(g.vazio || ids.indexOf(g.id)<0) return;
+    if(g.sec!==sec){
+      sec=g.sec;
+      const s=REL_SECOES.find(x=>x.k===sec);
+      if(s && !s.capa) out.push({t:"secao",txt:s.nome});
+    }
+    out.push({t:"grupo",txt:g.nome,sub:g.sub});
+    g.blocos().forEach(b=>out.push(b));
+  });
+  return out;
+}
+
+/* ---------------------- desenho 1: HTML para imprimir ---------------------- */
+function relCelHTML(cel,tag){
+  const o = typeof cel==="string" ? {v:cel} : (cel||{});
+  const cls=[o.r?"r":"", o.b?"b":"", o.cls||""].filter(Boolean).join(" ");
+  const pt=o.cor?`<i class="pt" style="background:${o.cor}"></i>`:"";
+  return `<${tag}${cls?` class="${cls}"`:""}>${pt}${esc(o.v==null?"":o.v)}</${tag}>`;
+}
+function relTabHTML(b){
+  const soma=b.cols.reduce((a,c)=>a+(c.w||1),0);
+  const grupo=`<colgroup>${b.cols.map(c=>`<col style="width:${(100*(c.w||1)/soma).toFixed(2)}%">`).join("")}</colgroup>`;
+  const cab=`<thead><tr>${b.cols.map(c=>relCelHTML({v:c.l,r:c.r},"th")).join("")}</tr></thead>`;
+  const corpo=`<tbody>${b.linhas.map(L=>`<tr>${L.map(c=>relCelHTML(c,"td")).join("")}</tr>`).join("")}`
+    + (b.total?`<tr class="tot">${b.total.map(c=>relCelHTML(c,"td")).join("")}</tr>`:"")
+    + `</tbody>`;
+  return `<table>${grupo}${cab}${corpo}</table>`;
+}
+function relHTML(t,blocos,paraImprimir){
+  const h=new Date();
+  const agora=`${String(h.getDate()).padStart(2,"0")}/${String(h.getMonth()+1).padStart(2,"0")}/${h.getFullYear()}`;
+  const periodo=(t.inicio&&t.fim)?relData(t.inicio)+" a "+relData(t.fim):"sem datas";
+  const auto=paraImprimir?`<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script>`:"";
+  let corpo="";
+  blocos.forEach(b=>{
+    if(b.t==="secao") corpo+=`<h2>${esc(b.txt)}</h2>`;
+    else if(b.t==="grupo") corpo+=`<h3>${esc(b.txt)}</h3>`+(b.sub?`<p class="gsub">${esc(b.sub)}</p>`:"");
+    else if(b.t==="dia") corpo+=`<div class="dia"><span>${esc(b.txt)}</span><b>${esc(b.dir||"")}</b></div>`;
+    else if(b.t==="kv") corpo+=`<table class="kv">${b.itens.map(i=>
+      `<tr><td>${esc(i[0])}</td><td${i[2]?` class="${i[2]}"`:""}>${esc(i[1])}</td></tr>`).join("")}</table>`;
+    else if(b.t==="tab") corpo+=relTabHTML(b);
+    else if(b.t==="nota") corpo+=`<p class="nota">${esc(b.txt)}</p>`;
+    else if(b.t==="texto") corpo+=`<p class="texto">${esc(b.txt).replace(/\n/g,"<br>")}</p>`;
+  });
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relatório — ${esc(t.nome||"Viagem")}</title>
+<style>
+:root{--green:#14614a;--green-2:#2e8f6f;--olive:#7fa65c;--gold:#c08a2e;
+  --clay:#a85b3c;--blue:#4a6fa5;--slate:#6b7b76}
+*{box-sizing:border-box}
+body{font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1c1c1a;
+  margin:0;padding:30px 28px;background:#fff;line-height:1.45;font-size:13px}
+.wrap{max-width:900px;margin:0 auto}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:29px;margin:0 0 3px;color:#14614a}
+.cab{font-size:13.5px;color:#555}
+.selo{margin:5px 0 4px;font-size:11px;color:#a4a9a2}
+h2{font-family:Georgia,serif;font-size:12.5px;letter-spacing:.15em;text-transform:uppercase;
+  color:#14614a;margin:34px 0 0;padding-bottom:5px;border-bottom:1.5px solid #14614a;
+  break-after:avoid;page-break-after:avoid}
+h3{font-family:Georgia,serif;font-size:17px;font-weight:600;margin:19px 0 1px;
+  break-after:avoid;page-break-after:avoid}
+.gsub{margin:0 0 9px;font-size:11.5px;color:#9a9f98;break-after:avoid;page-break-after:avoid}
+.dia{display:flex;justify-content:space-between;gap:14px;margin:15px 0 3px;font-size:12.5px;
+  font-weight:600;border-bottom:1px solid #e3e3df;padding-bottom:3px;
+  break-after:avoid;page-break-after:avoid}
+table{width:100%;border-collapse:collapse;margin:0 0 7px;font-size:11.5px;table-layout:fixed}
+thead{display:table-header-group}
+thead th{text-align:left;color:#80867f;font-weight:500;font-size:10px;letter-spacing:.05em;
+  text-transform:uppercase;border-bottom:1px solid #cfd4cd;padding:5px 7px}
+tbody td{border-bottom:1px solid #f1f0ec;padding:5px 7px;vertical-align:top;
+  overflow-wrap:break-word}
+tr{break-inside:avoid;page-break-inside:avoid}
+th.r,td.r{text-align:right;white-space:nowrap}
+td.b{font-weight:600}
+tr.tot td{border-top:1.2px solid #1c1c1a;border-bottom:0;padding-top:7px;font-weight:600}
+.neg{color:#9e3b3b}
+.pos{color:#14614a}
+.pt{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;
+  vertical-align:middle}
+table.kv{font-size:12.5px;margin-bottom:9px;table-layout:auto}
+table.kv td{padding:5px 0;border-bottom:1px solid #f4f3f0}
+table.kv td:first-child{color:#777;width:52%}
+table.kv td:last-child{text-align:right;font-weight:600}
+p.nota{font-size:11px;color:#9a9f98;margin:1px 0 11px;line-height:1.5}
+p.texto{font-size:12.5px;margin:0 0 11px;white-space:pre-wrap}
+.rodape{margin-top:30px;padding-top:9px;border-top:1px solid #e8e8e3;font-size:10px;color:#b3b7b1}
+@media print{ body{padding:0;font-size:11px} @page{margin:14mm 12mm} .selo{display:none} }
+</style></head>
+<body><div class="wrap">
+  <h1>${esc(t.nome||"Viagem")}</h1>
+  <div class="cab">${esc(t.destino||"")}${t.destino?" · ":""}${esc(periodo)}</div>
+  <div class="selo">Relatório gerado em ${agora}</div>
+  ${corpo}
+  <div class="rodape">Rota · relatório de ${esc(t.nome||"viagem")} · ${agora}</div>
+</div>${auto}</body></html>`;
+}
+
+/* ---------------------- desenho 2: Word ---------------------- */
+function relDOCX(t,blocos){
+  const LARG=9638;   /* A4 retrato menos as margens de 2 cm */
+  const par=(txt,o)=>{ o=o||{};
+    return `<w:p><w:pPr>`+(o.keep?`<w:keepNext/>`:"")+
+      (o.borda?`<w:pBdr><w:bottom w:val="single" w:sz="${o.borda}" w:space="3" w:color="${o.bordaCor||"14614A"}"/></w:pBdr>`:"")+
+      `<w:spacing w:before="${o.antes||0}" w:after="${o.depois==null?90:o.depois}"/>`+
+      `</w:pPr><w:r><w:rPr>`+(o.b?"<w:b/>":"")+(o.caps?"<w:caps/>":"")+
+      (o.esp?`<w:spacing w:val="${o.esp}"/>`:"")+
+      `<w:sz w:val="${o.sz||21}"/>`+(o.cor?`<w:color w:val="${o.cor}"/>`:"")+
+      `</w:rPr><w:t xml:space="preserve">${xmlEsc(txt==null?"":txt)}</w:t></w:r></w:p>`;
+  };
+  const cel=(txt,larg,o)=>{ o=o||{};
+    return `<w:tc><w:tcPr><w:tcW w:w="${larg}" w:type="dxa"/>`+
+      (o.fundo?`<w:shd w:val="clear" w:color="auto" w:fill="${o.fundo}"/>`:"")+
+      (o.topo?`<w:tcBorders><w:top w:val="single" w:sz="10" w:space="0" w:color="1C1C1A"/><w:bottom w:val="nil"/></w:tcBorders>`:"")+
+      `</w:tcPr><w:p><w:pPr><w:spacing w:before="20" w:after="20"/>`+
+      (o.r?`<w:jc w:val="right"/>`:"")+`</w:pPr><w:r><w:rPr>`+
+      (o.b?"<w:b/>":"")+`<w:sz w:val="${o.sz||17}"/>`+
+      (o.cor?`<w:color w:val="${o.cor}"/>`:"")+
+      `</w:rPr><w:t xml:space="preserve">${xmlEsc(txt==null?"":txt)}</w:t></w:r></w:p></w:tc>`;
+  };
+  const corDe=o=>o.cor?relHex(o.cor):(o.cls==="neg"?REL_NEG:(o.cls==="pos"?REL_POS:""));
+  const normal=c=>typeof c==="string"?{v:c}:(c||{});
+  const moldura=(cols,corpo)=>
+    `<w:tbl><w:tblPr><w:tblW w:w="${LARG}" w:type="dxa"/><w:tblLayout w:type="fixed"/>`+
+    `<w:tblBorders>${["top","left","bottom","right","insideH","insideV"].map(b=>
+      `<w:${b} w:val="single" w:sz="2" w:space="0" w:color="E4E7E2"/>`).join("")}</w:tblBorders>`+
+    `</w:tblPr><w:tblGrid>${cols.map(w=>`<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`+
+    corpo+`</w:tbl>`;
+  /* uma tabela não pode encostar na outra: o Word junta as duas numa só */
+  const respiro=par("",{depois:0,sz:8});
+
+  const tabela=b=>{
+    const soma=b.cols.reduce((a,c)=>a+(c.w||1),0);
+    const ws=b.cols.map(c=>Math.round(LARG*(c.w||1)/soma));
+    let x=`<w:tr><w:trPr><w:tblHeader/></w:trPr>`+b.cols.map((c,i)=>
+      cel(c.l||"",ws[i],{b:1,fundo:"14614A",cor:"FFFFFF",sz:15,r:c.r})).join("")+`</w:tr>`;
+    b.linhas.forEach(L=>{ x+=`<w:tr>`+L.map((c,i)=>{ const o=normal(c);
+      return cel(o.v,ws[i],{r:o.r,b:o.b,cor:corDe(o)}); }).join("")+`</w:tr>`; });
+    if(b.total) x+=`<w:tr>`+b.total.map((c,i)=>{ const o=normal(c);
+      return cel(o.v,ws[i],{r:o.r,b:1,topo:1,cor:corDe(o)}); }).join("")+`</w:tr>`;
+    return moldura(ws,x)+respiro;
+  };
+  const pares=itens=>{
+    const w1=Math.round(LARG*0.56), w2=LARG-w1;
+    let x="";
+    itens.forEach(i=>{ x+=`<w:tr>`+cel(i[0],w1,{cor:"6B7B76"})+
+      cel(i[1],w2,{r:1,b:1,cor:i[2]==="neg"?REL_NEG:(i[2]==="pos"?REL_POS:"")})+`</w:tr>`; });
+    return `<w:tbl><w:tblPr><w:tblW w:w="${LARG}" w:type="dxa"/><w:tblLayout w:type="fixed"/>`+
+      `<w:tblBorders><w:insideH w:val="single" w:sz="2" w:space="0" w:color="F1F0EC"/>`+
+      `<w:bottom w:val="single" w:sz="2" w:space="0" w:color="F1F0EC"/></w:tblBorders></w:tblPr>`+
+      `<w:tblGrid><w:gridCol w:w="${w1}"/><w:gridCol w:w="${w2}"/></w:tblGrid>${x}</w:tbl>`+respiro;
+  };
+
+  const h=new Date();
+  const agora=`${String(h.getDate()).padStart(2,"0")}/${String(h.getMonth()+1).padStart(2,"0")}/${h.getFullYear()}`;
+  const periodo=(t.inicio&&t.fim)?relData(t.inicio)+" a "+relData(t.fim):"sem datas";
+  let corpo=par(t.nome||"Viagem",{b:1,sz:40,cor:"14614A",depois:40});
+  corpo+=par((t.destino?t.destino+" · ":"")+periodo,{sz:20,cor:"4A5D56",depois:30});
+  corpo+=par("Relatório gerado em "+agora,{sz:16,cor:"A4A9A2",depois:260});
+
+  blocos.forEach(b=>{
+    if(b.t==="secao") corpo+=par(b.txt,{b:1,sz:17,cor:"14614A",caps:1,esp:28,
+      antes:300,depois:140,borda:12,keep:1});
+    else if(b.t==="grupo"){
+      corpo+=par(b.txt,{b:1,sz:26,antes:170,depois:b.sub?20:80,keep:1});
+      if(b.sub) corpo+=par(b.sub,{sz:16,cor:"9A9F98",depois:80,keep:1});
+    }
+    else if(b.t==="dia") corpo+=par(b.txt+"   —   "+(b.dir||""),
+      {b:1,sz:19,antes:140,depois:50,borda:4,bordaCor:"E3E3DF",keep:1});
+    else if(b.t==="kv") corpo+=pares(b.itens);
+    else if(b.t==="tab") corpo+=tabela(b);
+    else if(b.t==="nota") corpo+=par(b.txt,{sz:15,cor:"9A9F98",depois:120});
+    else if(b.t==="texto") String(b.txt).split("\n").forEach(l=>{ corpo+=par(l,{sz:21,depois:60}); });
+  });
+  corpo+=par("Rota · relatório de "+(t.nome||"viagem")+" · "+agora,
+    {sz:14,cor:"B3B7B1",antes:320,depois:0});
+
+  const doc=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+${corpo}
+<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="709" w:footer="709" w:gutter="0"/></w:sectPr>
+</w:body></w:document>`;
+  return zipStore([
+    {nome:"[Content_Types].xml", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`)},
+    {nome:"_rels/.rels", dados:bytesDe(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`)},
+    {nome:"word/document.xml", dados:bytesDe(doc)}
+  ]);
+}
+
+/* ---------------------- a escolha e a saída ---------------------- */
+/* Começa com tudo que tem conteúdo marcado, e lembra a escolha enquanto a
+   viagem for a mesma. Grupo que ganhou conteúdo depois entra marcado. */
+function relGarantirSel(t){
+  const G=relGrupos(t);
+  if(!state.relSel || state.relSelTrip!==t.id){
+    state.relSelTrip=t.id; state.relSel={};
+    G.forEach(g=>{ if(!g.vazio) state.relSel[g.id]=true; });
+  }else{
+    G.forEach(g=>{ if(!g.vazio && state.relSel[g.id]===undefined) state.relSel[g.id]=true; });
+  }
+  return G;
+}
+function relEscolhidos(t){
+  const G=relGarantirSel(t);
+  return G.filter(g=>!g.vazio && state.relSel[g.id]).map(g=>g.id);
+}
+function modalRelatorio(){
+  const t=trip(); if(!t) return "";
+  const G=relGarantirSel(t);
+  const uteis=G.filter(g=>!g.vazio);
+  const marc=uteis.filter(g=>state.relSel[g.id]).length;
+  let secs="";
+  REL_SECOES.forEach(s=>{
+    const gs=G.filter(g=>g.sec===s.k); if(!gs.length) return;
+    const u=gs.filter(g=>!g.vazio);
+    const todos=u.length>0 && u.every(g=>state.relSel[g.id]);
+    secs+=`<div class="relsec">
+      <div class="relsect"><b>${esc(s.nome)}</b>
+        ${u.length?`<label class="reltodos"><input type="checkbox" data-reltodos="${s.k}"
+            ${todos?"checked":""}><span>todos</span></label>`
+          :`<span class="relnada">nada lançado</span>`}</div>
+      ${gs.map(g=>`<label class="relopt${g.vazio?" off":""}">
+        <input type="checkbox" data-relg="${g.id}" data-relsec="${g.sec}"
+          ${g.vazio?"disabled":(state.relSel[g.id]?"checked":"")}>
+        <span class="relnome">${esc(g.nome)}</span>
+        <span class="relsub">${g.vazio?"vazio":esc(g.sub)}</span>
+      </label>`).join("")}
+    </div>`;
+  });
+  const pessoa=!!state.relPessoa;
+  return `<div class="scrim" data-scrim="1"><div class="sheet relsheet" role="dialog" aria-label="Relatório da viagem">
+    <h2>Relatório da viagem</h2>
+    <p class="sub">Marque o que vai no relatório. Ele sai na ordem da viagem: o que foi
+      planejado, o que já se gastou, e os dois lado a lado.</p>
+    <div class="relbar">
+      <label class="reltodos forte"><input type="checkbox" data-reltodos="*"
+        ${(marc===uteis.length&&uteis.length>0)?"checked":""}><span>Todos os grupos</span></label>
+      <div class="seg">
+        <button data-relver="grupo" aria-pressed="${!pessoa}">Grupo</button>
+        <button data-relver="pessoa" aria-pressed="${pessoa}">Por pessoa</button>
+      </div>
+    </div>
+    <div class="relgrid">${secs}</div>
+    <p class="hint" id="relconta">${relConta(marc,uteis.length)}</p>
+    <div class="acts">
+      <button class="btn ghost" data-act="fechar">Cancelar</button>
+      <button class="btn" data-relsai="docx">Word</button>
+      <button class="btn" data-relsai="pdf">PDF</button>
+      <button class="btn primary" data-relsai="imprimir">Imprimir</button>
+    </div>
+  </div></div>`;
+}
+const relConta=(m,d)=> d===0 ? "Esta viagem ainda não tem nada para relatar."
+  : m===0 ? "Nenhum grupo marcado — marque ao menos um."
+  : `${m} de ${d} ${d===1?"grupo":"grupos"} marcado${m===1?"":"s"}.`;
+/* Marcar não redesenha a folha: perderia o lugar da rolagem. Lê as caixas,
+   guarda a escolha e acerta só os "todos" e a contagem. */
+function relSincronizar(){
+  const t=trip(); if(!t) return;
+  const caixas=[].slice.call(document.querySelectorAll("[data-relg]"));
+  caixas.forEach(cx=>{ if(!cx.disabled) state.relSel[cx.dataset.relg]=cx.checked; });
+  REL_SECOES.forEach(s=>{
+    const u=caixas.filter(cx=>!cx.disabled && cx.dataset.relsec===s.k);
+    const alvo=document.querySelector(`[data-reltodos="${s.k}"]`);
+    if(alvo) alvo.checked = u.length>0 && u.every(cx=>cx.checked);
+  });
+  const u=caixas.filter(cx=>!cx.disabled);
+  const marc=u.filter(cx=>cx.checked).length;
+  const geral=document.querySelector('[data-reltodos="*"]');
+  if(geral) geral.checked = u.length>0 && marc===u.length;
+  const conta=document.getElementById("relconta");
+  if(conta) conta.textContent=relConta(marc,u.length);
+}
+function relMarcarTodos(sec,valor){
+  [].slice.call(document.querySelectorAll("[data-relg]")).forEach(cx=>{
+    if(cx.disabled) return;
+    if(sec==="*" || cx.dataset.relsec===sec) cx.checked=valor;
+  });
+  relSincronizar();
+}
+function imprimirRelatorio(){
+  const t=trip(); if(!t) return false;
+  const ids=relEscolhidos(t);
+  if(!ids.length){ toast("Marque ao menos um grupo"); return false; }
+  const w=window.open("","_blank");
+  if(!w){ toast("Permita pop-ups para imprimir"); return false; }
+  w.document.write(relHTML(t,relBlocos(t,ids),true)); w.document.close();
+  return true;
+}
+/* formato: "imprimir" | "pdf" | "docx" | "html" */
+function baixarRelatorio(formato){
+  const t=trip(); if(!t) return;
+  const ids=relEscolhidos(t);
+  if(!ids.length){ toast("Marque ao menos um grupo"); return; }
+  const base="relatorio-"+slugViagem(t);
+  try{
+    if(formato==="imprimir"){
+      if(imprimirRelatorio()){ state.modal=null; renderModal(); }
+      return;
+    }
+    if(formato==="pdf"){
+      /* o próprio navegador faz um PDF melhor, com texto selecionável, do que
+         qualquer conversão que a gente fizesse aqui */
+      if(imprimirRelatorio()){
+        state.modal=null; renderModal();
+        toast("Na janela que abriu, escolha Salvar como PDF");
+      }
+      return;
+    }
+    if(formato==="docx"){
+      salvarArquivo(base+".docx", relDOCX(t,relBlocos(t,ids)),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      state.modal=null; renderModal(); toast("Relatório em Word baixado"); return;
+    }
+    salvarArquivo(base+".html", relHTML(t,relBlocos(t,ids),false), "text/html;charset=utf-8");
+    state.modal=null; renderModal(); toast("Relatório em HTML baixado");
+  }catch(e){ toast("Não consegui gerar o relatório: "+(e.message||e)); }
+}
+
 function secaoCalendario(t){
   const aberto=!!(state.abertos&&state.abertos.calendario);
   const marcos=Array.isArray(t.marcos)?t.marcos:[];
@@ -3077,6 +3597,10 @@ function viewTrip(){
 
   ${secaoCalendario(t)}
 
+  <div class="relbarra">
+    <button class="btn small" data-act="relatorio" title="Monta um relatório com o que você escolher">Imprimir relatório</button>
+  </div>
+
   <div class="layout">
     <div class="catlist">
 ${listaCategorias(t)}
@@ -3403,6 +3927,7 @@ function renderModal(){
   if(state.modal==="mapa"){ ov.innerHTML=modalMapa(); return; }
   if(state.modal==="local"){ ov.innerHTML=modalLocal(); renderPainelLocal(); return; }
   if(state.modal==="importar"){ ov.innerHTML=modalImportar(); return; }
+  if(state.modal==="relatorio"){ ov.innerHTML=modalRelatorio(); return; }
   if(state.modal==="ano"){
     ov.innerHTML=`<div class="scrim" data-scrim="1"><div class="sheet" role="dialog" aria-label="Adicionar ano">
       <h2>Adicionar ano</h2><p class="sub">Escolha o ano que quer planejar.</p>
@@ -3490,6 +4015,8 @@ document.addEventListener("click",e=>{
   }
   /* clicar na cidade na legenda abre (ou fecha) as paletas */
   if(t.dataset.baixarcal){ baixarCalendario(t.dataset.baixarcal); return; }
+  if(t.dataset.relsai){ baixarRelatorio(t.dataset.relsai); return; }
+  if(t.dataset.relver){ state.relPessoa = t.dataset.relver==="pessoa"; renderModal(); return; }
   if(t.dataset.calcor){
     const alvo=t.dataset.calcor;
     state.calCorSel = (state.calCorSel===alvo) ? null : alvo;
@@ -3659,6 +4186,7 @@ document.addEventListener("click",e=>{
   }
   if(act==="parcelar"){ state.modal="parcelar"; renderModal(); return; }
   if(act==="lancarparcelas"){ lancarParcelas(); return; }
+  if(act==="relatorio"){ state.modal="relatorio"; renderModal(); return; }
   if(act==="imprimircal"){ imprimirCalendario(); return; }
   if(act==="baixarcal"){ baixarCalendario("html"); return; }
   if(act==="gerarcal"){ const tr=trip(); if(tr) gerarAgendaDeMarcos(tr,false); return; }
@@ -4026,6 +4554,8 @@ document.addEventListener("focusout",e=>{
 
 document.addEventListener("change",e=>{
   const el=e.target;
+  if(el.dataset && el.dataset.relg){ relSincronizar(); return; }
+  if(el.dataset && el.dataset.reltodos){ relMarcarTodos(el.dataset.reltodos,el.checked); return; }
   /* sincroniza campos → calendário ao terminar de editar (sair do campo), não a cada
      tecla — isso recriava a tela e jogava o scroll para o topo. */
   if(el.dataset && el.dataset.p){

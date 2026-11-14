@@ -7,7 +7,12 @@
  *   RAPIDAPI_KEY = a chave do RapidAPI (marcar como Secret, não como plaintext)
  *
  * O app chama POST /api/voos com:
- *   { de:"GRU", para:"IST", data:"2027-05-06", adultos:4, criancas:0, classe:"ECONOMY" }
+ *   { de:"GRU", para:"IST", data:"2027-05-06", adultos:4, criancas:0, classe:"ECONOMY",
+ *     filtro:{ empresa:"Turkish", numero:"TK 16", paradas:"direto",
+ *              sai:"noite", chega:"tarde" } }
+ *
+ * O filtro é aplicado aqui, antes de cortar nos 40 melhores: um voo específico
+ * pode estar em quinquagésimo lugar por preço e precisa ser encontrado mesmo assim.
  */
 
 const HOST = "google-flights2.p.rapidapi.com";
@@ -49,6 +54,71 @@ function normalizarVoo(v, melhor) {
     melhor: !!melhor,
     token: v.booking_token || ""
   };
+}
+
+/* ---------------------------------------------------------------- filtro ---
+   Tudo o que dá para filtrar já vem em normalizarVoo, então nada disso custa
+   uma chamada a mais à API: filtramos a lista que ela devolveu. */
+const FAIXAS = { madrugada:[0,4], manha:[5,11], tarde:[12,17], noite:[18,23] };
+
+/* O horário vem como "2027-05-06 22:30" em uns itinerários e ISO em outros,
+   então pegamos a primeira hora que aparecer no texto. */
+export function horaDe(txt) {
+  const m = String(txt || "").match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  return h >= 0 && h <= 23 ? h : null;
+}
+function casaFaixa(txt, faixa) {
+  if (!faixa || !FAIXAS[faixa]) return true;
+  const h = horaDe(txt);
+  if (h == null) return false;   /* sem horário, não dá para afirmar que casa */
+  const [a, b] = FAIXAS[faixa];
+  return h >= a && h <= b;
+}
+/* sem acento, sem espaço, tudo maiúsculo: "Latam" acha "LATAM", "tk 16" acha "TK16" */
+const limpo = s => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toUpperCase().replace(/\s+/g, "");
+const sigla   = s => (s.match(/^[A-Z]+/) || [""])[0];
+const digitos = s => s.replace(/^[A-Z]+/, "");
+
+export function casaVoo(v, f) {
+  if (!f) return true;
+  if (f.paradas === "direto" && v.escalas > 0) return false;
+  if (f.paradas === "escala" && v.escalas === 0) return false;
+  if (!casaFaixa(v.saida, f.sai)) return false;
+  if (!casaFaixa(v.chegada, f.chega)) return false;
+
+  if (f.empresa) {
+    const alvo = limpo(f.empresa);
+    const achou = (v.cias || []).some(c => limpo(c).indexOf(alvo) >= 0)
+               || (v.numeros || []).some(x => limpo(x).indexOf(alvo) >= 0);
+    if (!achou) return false;
+  }
+  if (f.numero) {
+    /* "16", "TK16" e "TK 16" têm de achar o mesmo voo. O número casa inteiro,
+       nunca por pedaço, senão 16 acharia o voo 160. */
+    const alvo = limpo(f.numero), d = digitos(alvo), c = sigla(alvo);
+    if (!d) return false;
+    const achou = (v.numeros || []).some(x => {
+      const p = limpo(x);
+      return digitos(p) === d && (!c || sigla(p) === c);
+    });
+    if (!achou) return false;
+  }
+  return true;
+}
+/* Devolve só o que o usuário realmente pediu, para o app saber o que aplicou. */
+export function lerFiltro(f) {
+  if (!f || typeof f !== "object") return null;
+  const txt = x => String(x || "").trim().slice(0, 40);
+  const faixa = x => FAIXAS[x] ? x : "";
+  const out = {
+    empresa: txt(f.empresa), numero: txt(f.numero),
+    paradas: (f.paradas === "direto" || f.paradas === "escala") ? f.paradas : "",
+    sai: faixa(f.sai), chega: faixa(f.chega)
+  };
+  return Object.keys(out).some(k => out[k]) ? out : null;
 }
 
 /* priceHistory traz faixas em formato de operadores. O campo "high" vem com o
@@ -144,14 +214,22 @@ export async function onRequestPost({ request, env }) {
   /* melhor custo-benefício primeiro, depois por preço */
   voos.sort((a, b) => (b.melhor - a.melhor) || (a.preco - b.preco));
 
+  /* o filtro entra ANTES do corte: o voo procurado pode não estar entre os 40
+     mais baratos, e é justamente ele que a pessoa quer achar */
+  const filtro = lerFiltro(corpo.filtro);
+  const achados = voos.length;
+  const escolhidos = filtro ? voos.filter(v => casaVoo(v, filtro)) : voos;
+
   return json({
     de, para, data,
     adultos: Number(corpo.adultos) || 1,
     criancas: Number(corpo.criancas) || 0,
-    total: voos.length,
+    filtro,
+    achados,
+    total: escolhidos.length,
     descartados: brutos.length - voos.length,
     faixa: faixaDePreco(d && d.data && d.data.priceHistory),
-    voos: voos.slice(0, 40)
+    voos: escolhidos.slice(0, 40)
   });
 }
 

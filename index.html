@@ -665,6 +665,24 @@ aside{position:sticky;top:78px;display:grid;gap:18px}
 .calsec.aberto .calbody{grid-template-rows:1fr}
 .calinner{padding:4px 16px 16px}
 /* ---- folha de escolha do relatório ---- */
+.pcbase{border:1px solid var(--rule);border-radius:10px;padding:10px 13px 11px;
+  background:var(--panel-2)}
+.pclin{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:4px 0;font-size:12.5px}
+.pclin+.pclin{border-top:1px solid var(--rule-2)}
+.pclin span{color:var(--ink-3)}
+.pclin b{font-variant-numeric:tabular-nums;font-weight:600}
+.pclin.forte b{font-size:15px;color:var(--green)}
+.pcnota{font-size:11px;color:var(--ink-3);line-height:1.4;padding:1px 0 4px}
+.pclin.ok b{color:var(--green)}
+.pclin.neg b{color:var(--clay)}
+.pcbot{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;
+  padding-top:9px;border-top:1px solid var(--rule-2)}
+.pcvalor{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin:-4px 0 12px;padding:11px 14px;border:1px solid var(--rule);border-radius:10px;
+  background:var(--panel-2)}
+.pcvalor span{font-size:12px;color:var(--ink-3)}
+.pcvalor b{font-family:"Newsreader",Georgia,serif;font-size:23px;font-weight:600;color:var(--green)}
 .relsheet{width:min(720px,100%)}
 .relbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   padding:10px 13px;margin:0 0 12px;border:1px solid var(--rule);border-radius:10px;
@@ -1040,7 +1058,7 @@ let state={trips:[],view:"ano",ano:new Date().getFullYear(),tripId:null,abertos:
            cotacao:null, buscandoCotacao:false, voos:null, hoteis:null, atr:null, perna:"todas", geocodando:false, rotulosFixos:false,
            localId:null, sugestoes:[], buscando:false, distA:"", distB:"", distRes:null,
            otim:null, otimPerfil:"pe", otimFechado:false, otimizando:false, erroMapa:"",
-           relSel:null, relSelTrip:null, relPessoa:false};
+           relSel:null, relSelTrip:null, relPessoa:false, pcSub:true};
 let db=null, saveTimer=null, dirty=new Set();
 
 /* Supabase — projeto decora3d, tabela vg_viagens_global.
@@ -2208,6 +2226,36 @@ function mesesOpcoes(t){
   for(let i=0;i<36;i++){ out.push(c); c=somaMes(c,1); }
   return out;
 }
+/* O que da para parcelar nesta categoria. Sem isso a pessoa abre o modal e tem
+   de adivinhar: o campo vinha preenchido com a falta, que e zero numa categoria
+   ja fechada, e af o modal pedia um numero que ele mesmo nao mostrava. */
+function pcNumeros(t,k,c){
+  const custo=num(metaDaLinha(t,k,c)), lancado=num(somaPlanejada(t,k));
+  const ms=mesesDoPlano(t).filter(m=>valPlano(t,m,k)>0.005);
+  return {custo, lancado, falta:Math.round((custo-lancado)*100)/100,
+          n:ms.length, de:ms[0]||"", ate:ms[ms.length-1]||""};
+}
+/* Com "substituir" ligado o que se parcela e o custo inteiro, porque as parcelas
+   antigas somem. Sem ele, so o que ainda falta lancar. */
+const pcSugerido=(nu,sub)=> sub ? nu.custo : Math.max(0,nu.falta);
+/* "Falta lancar" e quase sempre zero, porque fecharParcelas acerta a categoria
+   sozinha assim que ela tem qualquer parcela. Entao o numero que decide e o
+   CUSTO, e o que importa saber e o que o "substituir" vai apagar. */
+function pcBlocoHTML(t,k,c,sub){
+  const nu=pcNumeros(t,k,c);
+  const fechada=Math.abs(nu.falta)<0.005, demais=nu.falta<-0.005;
+  return `<div class="pclin forte"><span>Custo da categoria</span><b>${brl(nu.custo)}</b></div>
+    <div class="pclin"><span>Já lançado no plano</span><b>${nu.lancado>0.005?brl(nu.lancado):"—"}</b></div>
+    ${nu.n?`<div class="pcnota">${nu.n}${nu.n===1?" parcela":" parcelas"}, de
+       ${esc(rotuloMes(nu.de))} a ${esc(rotuloMes(nu.ate))}${sub?" — vão ser substituídas":""}</div>`:""}
+    <div class="pclin ${fechada?"ok":(demais?"neg":"")}">
+      <span>${demais?"Lançado a mais":"Falta lançar"}</span>
+      <b>${fechada?"nada, está fechada":brl(Math.abs(nu.falta))}</b></div>
+    <div class="pcbot">
+      <button type="button" class="btn small" data-pcusar="custo">usar o custo total</button>
+      ${nu.falta>0.005?`<button type="button" class="btn small" data-pcusar="falta">usar só o que falta</button>`:""}
+    </div>`;
+}
 function modalParcelar(){
   const t=trip(); if(!t) return "";
   const c=compute(t);
@@ -2220,19 +2268,22 @@ function modalParcelar(){
     return `<option value="${l.k}" ${l.k===k0?"selected":""}>${esc(l.nome)} — ${f>0?"falta "+brl(f):(f<0?brl(-f)+" a mais":"fechada")}</option>`;
   }).join("");
   const opMes=meses.map(m=>`<option value="${m}" ${m===mesPadrao?"selected":""}>${esc(rotuloMes(m))}</option>`).join("");
-  const faltaK=faltaDaCategoria(t,k0,c);
+  const sub0=state.pcSub!==false;
+  const valor0=pcSugerido(pcNumeros(t,k0,c),sub0);
   return `<div class="scrim" data-scrim="1"><div class="sheet" role="dialog" aria-label="Parcelar categoria">
     <h2>Parcelar uma categoria</h2>
     <p class="sub">Escolha a partir de qual mês e em quantas vezes. As parcelas podem terminar depois da viagem.</p>
     <div class="fields">
       <div class="f span2"><label>Categoria</label><select id="pc_cat">${opCat}</select></div>
+      <div class="pcbase span2" id="pc_base">${pcBlocoHTML(t,k0,c,sub0)}</div>
       <div class="f"><label>A partir de</label><select id="pc_mes">${opMes}</select></div>
-      <div class="f"><label>Parcelas</label><input id="pc_n" type="text" inputmode="numeric" value="${state.pcN||6}"></div>
+      <div class="f"><label>Em quantas vezes</label><input id="pc_n" type="text" inputmode="numeric" value="${state.pcN||6}"></div>
       <div class="f span2"><label>Valor a parcelar (R$)</label>
-        <input id="pc_valor" type="text" inputmode="decimal" value="${fmt(Math.max(0,faltaK))}"></div>
+        <input id="pc_valor" type="text" inputmode="decimal" value="${fmt(valor0)}"></div>
     </div>
-    <label class="chk" style="margin:-6px 0 16px"><input type="checkbox" id="pc_sub" checked>
+    <label class="chk" style="margin:-6px 0 16px"><input type="checkbox" id="pc_sub" ${sub0?"checked":""}>
       <span>Substituir o que já está lançado nesta categoria</span></label>
+    <div class="pcvalor"><span>Cada parcela</span><b id="pc_cada">—</b></div>
     <p id="pc_preview" class="previa"></p>
     <div class="acts">
       <button class="btn ghost" data-act="fechar">Cancelar</button>
@@ -2240,17 +2291,44 @@ function modalParcelar(){
     </div>
   </div></div>`;
 }
+/* Redesenha o bloco de numeros e reacerta o valor sugerido. Chamado ao trocar de
+   categoria e ao ligar/desligar o "substituir", porque os dois mudam a resposta. */
+function pcAtualizarBase(){
+  const t=trip(); if(!t) return;
+  const c=compute(t);
+  const cat=document.getElementById("pc_cat"); if(!cat) return;
+  const sub=document.getElementById("pc_sub");
+  state.pcSub = sub ? sub.checked : true;
+  const base=document.getElementById("pc_base");
+  if(base) base.innerHTML=pcBlocoHTML(t,cat.value,c,state.pcSub);
+  const cv=document.getElementById("pc_valor");
+  if(cv) cv.value=fmt(pcSugerido(pcNumeros(t,cat.value,c),state.pcSub));
+}
+function pcPreencher(qual){
+  const t=trip(); if(!t) return;
+  const cat=document.getElementById("pc_cat"), cv=document.getElementById("pc_valor");
+  if(!cat||!cv) return;
+  const nu=pcNumeros(t,cat.value,compute(t));
+  cv.value=fmt(qual==="falta" ? Math.max(0,nu.falta) : nu.custo);
+  previaParcelas();
+}
 function previaParcelas(){
   const el=document.getElementById("pc_preview"); if(!el) return;
   const v=id=>{const e=document.getElementById(id); return e?e.value:"";};
   const n=Math.max(1,Math.round(num(v("pc_n"))));
   const total=num(v("pc_valor")), mesIni=v("pc_mes");
-  if(!(total>0)||!mesIni){ el.innerHTML="Informe o valor a parcelar."; el.className="previa"; return; }
+  if(!(total>0)||!mesIni){
+    el.innerHTML="Informe o valor, ou use um dos botões acima."; el.className="previa";
+    const z=document.getElementById("pc_cada"); if(z) z.textContent="—";
+    return;
+  }
   const parcela=Math.round((total/n)*100)/100;
   const ultima=Math.round((total-parcela*(n-1))*100)/100;
   const fim=somaMes(mesIni,n-1);
   const t=trip();
   const depois = t&&t.fim && fim>t.fim.slice(0,7);
+  const cada=document.getElementById("pc_cada");
+  if(cada) cada.textContent=brl(parcela);
   el.className="previa";
   el.innerHTML=`<b>${n}×</b> de <b>${brl(parcela)}</b>`+
     (Math.abs(ultima-parcela)>0.004?` (última de ${brl(ultima)})`:"")+
@@ -2277,6 +2355,7 @@ function lancarParcelas(){
     t.plano[m][k]=Math.round(((t.plano[m][k]||0)+add)*100)/100;
   }
   state.pcCat=k; state.pcMes=mesIni; state.pcN=n;
+  state.pcSub = sub ? sub.checked : true;
   state.modal=null; state.abertos.plano=true;
   touch(t.id); render();
   toast(`${n}× lançadas a partir de ${rotuloMes(mesIni)}`);
@@ -4015,6 +4094,7 @@ document.addEventListener("click",e=>{
   }
   /* clicar na cidade na legenda abre (ou fecha) as paletas */
   if(t.dataset.baixarcal){ baixarCalendario(t.dataset.baixarcal); return; }
+  if(t.dataset.pcusar){ pcPreencher(t.dataset.pcusar); return; }
   if(t.dataset.relsai){ baixarRelatorio(t.dataset.relsai); return; }
   if(t.dataset.relver){ state.relPessoa = t.dataset.relver==="pessoa"; renderModal(); return; }
   if(t.dataset.calcor){
@@ -4466,12 +4546,7 @@ document.addEventListener("input",e=>{
     touch(tr.id); refresh(); return;
   }
   if(el.id&&el.id.indexOf("pc_")===0){
-    if(el.id==="pc_cat"){
-      const t=trip(), c=compute(t);
-      const f=faltaDaCategoria(t,el.value,c);
-      const cv=document.getElementById("pc_valor");
-      if(cv) cv.value=fmt(Math.max(0,f));
-    }
+    if(el.id==="pc_cat"||el.id==="pc_sub") pcAtualizarBase();
     previaParcelas(); return;
   }
   if(el.dataset.pl){
@@ -4585,11 +4660,7 @@ document.addEventListener("change",e=>{
     return;
   }
   if(el.id&&el.id.indexOf("pc_")===0){
-    if(el.id==="pc_cat"){
-      const t=trip(), c=compute(t);
-      const cv=document.getElementById("pc_valor");
-      if(cv) cv.value=fmt(Math.max(0,faltaDaCategoria(t,el.value,c)));
-    }
+    if(el.id==="pc_cat"||el.id==="pc_sub") pcAtualizarBase();
     previaParcelas(); return;
   }
   if(el.dataset && el.dataset.g && /\.moeda$/.test(el.dataset.g)){

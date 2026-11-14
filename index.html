@@ -3737,6 +3737,20 @@ function renderCambio(){
 
 /* ============================ atualização de números ============================ */
 function put(key,txt){ document.querySelectorAll(`[data-calc="${key}"]`).forEach(e=>e.textContent=txt); }
+/* Um <input type="date"> dispara "change" no MEIO da digitacao: assim que o ano
+   ganha dois digitos ja existe uma data valida — 23/05/0020 — e quem redesenha a
+   tela nessa hora destroi o campo antes de a pessoa digitar o resto do ano.
+   Enquanto o campo estiver em foco, adia o redesenho para quando ele sair.
+   Devolve true quando adiou. Campo de texto nao cai aqui: o "change" dele so
+   vem no blur, e af o foco ja mudou. */
+function adiarSeAindaDigitando(el,acao){
+  if(document.activeElement!==el) return false;
+  if(!el.dataset.adiado){
+    el.dataset.adiado="1";
+    el.addEventListener("blur",()=>{ delete el.dataset.adiado; acao(); },{once:true});
+  }
+  return true;
+}
 function refresh(){
   if(state.view!=="viagem") return;
   const t=trip(); if(!t) return;
@@ -4636,9 +4650,13 @@ document.addEventListener("change",e=>{
   if(el.dataset && el.dataset.p){
     const [k]=el.dataset.p.split("."), tr=trip();
     if(tr && !tr._sync && (tr.agenda&&tr.agenda.length) && (k==="passagens"||k==="hospedagem"||k==="atracoes")){
-      tr._sync=true; sincCamposParaCalendario(tr); tr._sync=false;
-      touch(tr.id); render();
-      return;
+      const sincroniza=()=>{
+        const t2=trip(); if(!t2||t2._sync) return;
+        t2._sync=true; sincCamposParaCalendario(t2); t2._sync=false;
+        touch(t2.id); render();
+      };
+      if(adiarSeAindaDigitando(el,sincroniza)) return;
+      sincroniza(); return;
     }
   }
   if(el.id==="hotquartos"||el.id==="hotcafe"){

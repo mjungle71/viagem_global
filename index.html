@@ -288,11 +288,10 @@ main{max-width:1420px;margin:0 auto;padding:26px 20px 90px}
   padding-top:11px;border-top:1px solid var(--rule-2)}
 .vfbot .hint{flex:1 1 180px;font-size:11px}
 .vfconta{margin:0 0 7px}
+.vfdica{font-style:normal;font-size:10.5px;color:var(--ink-3);line-height:1.35}
 .voonum{font-style:normal;font-size:11px;font-variant-numeric:tabular-nums;
   color:var(--ink-3);border:1px solid var(--rule);border-radius:5px;padding:1px 5px}
 @media (max-width:560px){ .vfpar{grid-template-columns:1fr} .vfrot{flex-basis:100%} }
-.voonum{font-style:normal;font-size:11px;font-variant-numeric:tabular-nums;
-  color:var(--ink-3);border:1px solid var(--rule);border-radius:5px;padding:1px 5px}
 .vooctrl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 11px}
 .vooctrl .hint{align-self:center;margin:0}
 .vooajuste{margin-left:auto;display:flex;align-items:center;gap:7px;
@@ -1871,7 +1870,8 @@ function blocoFiltroVoo(v){
         <label class="vfcampo"><span>Empresa</span>
           <input id="vf_empresa" type="text" value="${esc(f.empresa)}" placeholder="Turkish, LATAM, TK…"></label>
         <label class="vfcampo"><span>Número do voo</span>
-          <input id="vf_numero" type="text" value="${esc(f.numero)}" placeholder="TK 16 ou só 16"></label>
+          <input id="vf_numero" type="text" value="${esc(f.numero)}" placeholder="TK 16, ou AD 8750 TK 1756">
+          <i class="vfdica">Dois números acham a conexão que tem as duas pernas.</i></label>
       </div>
       <div class="vflinha"><span class="vfrot">Paradas</span>
         ${segFiltro("paradas",[["","Qualquer"],["direto","Direto"],["escala","Com escala"]],f.paradas)}</div>

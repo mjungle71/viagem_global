@@ -8,7 +8,7 @@
  *
  * O app chama POST /api/voos com:
  *   { de:"GRU", para:"IST", data:"2027-05-06", adultos:4, criancas:0, classe:"ECONOMY",
- *     filtro:{ empresa:"Turkish", numero:"TK 16", paradas:"direto",
+ *     filtro:{ empresa:"Turkish", numero:"AD 8750 TK 1756", paradas:"direto",
  *              sai:"noite", chega:"tarde" } }
  *
  * O filtro é aplicado aqui, antes de cortar nos 40 melhores: um voo específico
@@ -96,17 +96,29 @@ export function casaVoo(v, f) {
     if (!achou) return false;
   }
   if (f.numero) {
-    /* "16", "TK16" e "TK 16" têm de achar o mesmo voo. O número casa inteiro,
-       nunca por pedaço, senão 16 acharia o voo 160. */
-    const alvo = limpo(f.numero), d = digitos(alvo), c = sigla(alvo);
-    if (!d) return false;
-    const achou = (v.numeros || []).some(x => {
-      const p = limpo(x);
-      return digitos(p) === d && (!c || sigla(p) === c);
-    });
-    if (!achou) return false;
+    /* Pode vir mais de um número, para quem já sabe a conexão que quer:
+       "AD 8750 TK 1756" tem de achar o itinerário que traz AS DUAS pernas.
+       Por isso não dá para quebrar no espaço — "AD 8750" viraria "AD" e
+       "8750" —, e sim reconhecer cada número com sigla opcional. */
+    const pedidos = numerosPedidos(f.numero);
+    if (!pedidos.length) return false;
+    const temAPerna = alvo => {
+      const d = digitos(alvo), c = sigla(alvo);
+      if (!d) return false;
+      /* o número casa inteiro, nunca por pedaço, senão 16 acharia o voo 160 */
+      return (v.numeros || []).some(x => {
+        const p = limpo(x);
+        return digitos(p) === d && (!c || sigla(p) === c);
+      });
+    };
+    if (!pedidos.every(temAPerna)) return false;
   }
   return true;
+}
+/* "TK 16" · "tk16" · "AD 8750 TK 1756" · "AD8750, TK1756" → ["AD8750","TK1756"] */
+export function numerosPedidos(txt) {
+  const achados = String(txt || "").toUpperCase().match(/[A-Z]{0,3}\s?\d{1,5}/g) || [];
+  return achados.map(limpo).filter(Boolean);
 }
 /* Devolve só o que o usuário realmente pediu, para o app saber o que aplicou. */
 export function lerFiltro(f) {
@@ -114,7 +126,7 @@ export function lerFiltro(f) {
   const txt = x => String(x || "").trim().slice(0, 40);
   const faixa = x => FAIXAS[x] ? x : "";
   const out = {
-    empresa: txt(f.empresa), numero: txt(f.numero),
+    empresa: txt(f.empresa), numero: String(f.numero || "").trim().slice(0, 60),
     paradas: (f.paradas === "direto" || f.paradas === "escala") ? f.paradas : "",
     sai: faixa(f.sai), chega: faixa(f.chega)
   };
